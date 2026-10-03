@@ -51,16 +51,16 @@
   
 <style>
   /* 图片和覆盖层叠在同一个网格单元里，覆盖层的尺寸永远等于图片实际显示的尺寸 */
-  .viewer { display: grid; line-height: 0; max-width: 100%; }
-  .viewer > * { grid-area: 1 / 1; }
+  .viewer { display: grid; position: relative; line-height: 0; max-width: 100%; }
+  .viewer > img, .viewer > svg { grid-area: 1 / 1; }
   .viewer img { display: block; max-width: 100%; width: auto; height: auto; border-radius: 6px; }
   .viewer svg { width: 100%; height: 100%; }
-  /* 放大镜：和图片叠在同一个网格单元里，自己定位；不接鼠标事件，免得遮住触发它的框 */
-  #zoom { position: relative; pointer-events: none; z-index: 1; justify-self: start; align-self: start; }
-  #zoom > div { position: absolute; overflow: hidden; border: 2px solid #fff; border-radius: 4px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5); background: #000; }
-  /* 放大用的图不受 .viewer img 的最大宽高限制，否则被压回原尺寸后只剩黑框 */
-  #zoom img { position: absolute; display: block; max-width: none; max-height: none; border-radius: 0; }
+  /* 放大镜：鼠标在照片上移动时，半透明的取景框跟着走，照片右侧的面板按原始分辨率显示取景框里的那块 */
+  .lens { position: absolute; pointer-events: none; border: 1px solid #fff; background: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
+  .zoom-panel { position: absolute; left: 100%; top: 0; margin-left: 12px; pointer-events: none; z-index: 5;
+    border: 1px solid var(--line); border-radius: 6px; background-color: #000; background-repeat: no-repeat;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); }
   /* 框画在照片上，颜色不随明暗主题变：亮绿配黑色描边投影，在木色书架和深色书脊上都显眼 */
   .viewer rect { fill: transparent; stroke: #39ff14; stroke-width: 3; vector-effect: non-scaling-stroke; cursor: pointer;
     filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
@@ -220,7 +220,6 @@
             width="80" height="534"><title>仰观集：古文物的欣赏与鉴别 孙机 文物出版社</title></rect>
       
     </svg>
-    <div id="zoom" hidden><img src="13.jpg" alt=""></div>
   </div>
   </div>
   <div class="spine-col">
@@ -570,45 +569,53 @@
   const target = location.hash.match(/^#spine-(\d+)$/);
   if (target) activate(target[1], true);
 
-  // 鼠标停在框上：把这条书脊放大到与整张图等高（竖排）或等宽（横排），居中盖在照片上；移开就消失
-  const zoom = document.getElementById("zoom");
-  const zoomImg = zoom.querySelector("img");
-  function showZoom(rect) {
+  // 放大镜：鼠标在照片上移动，取景框跟着鼠标走，照片右侧的面板按原始分辨率（1 个存储像素对应 1 个屏幕像素）
+  // 显示取景框里的那一块。面板和显示出来的照片一样大，取景框的大小就是面板在照片上对应的范围。
+  const svgOverlay = viewer.querySelector("svg");
+  const lens = document.createElement("div");
+  lens.className = "lens";
+  lens.hidden = true;
+  const panel = document.createElement("div");
+  panel.className = "zoom-panel";
+  panel.hidden = true;
+  panel.style.backgroundImage = `url("${photoImg.getAttribute("src")}")`;
+  viewer.append(lens, panel);
+
+  function moveLens(event) {
     const shown = { w: photoImg.clientWidth, h: photoImg.clientHeight };
-    const [bx, by, bw, bh] = ["x", "y", "width", "height"].map((k) => Number(rect.getAttribute(k)));
-    // 框在屏幕上的尺寸
-    const sw = bw / NATURAL.w * shown.w, sh = bh / NATURAL.h * shown.h;
-    // 竖排按高放大到整张图的高，横排按宽放大到整张图的宽；另一边不许超出图片
-    const scale = bh >= bw ? Math.min(shown.h / sh, shown.w / sw) : Math.min(shown.w / sw, shown.h / sh);
-    const cw = sw * scale, ch = sh * scale;
-    let frame = zoom.firstElementChild;
-    if (frame.tagName !== "DIV") {
-      frame = document.createElement("div");
-      frame.append(zoomImg);
-      zoom.prepend(frame);
-    }
-    frame.style.width = `${cw}px`;
-    frame.style.height = `${ch}px`;
-    frame.style.left = `${(shown.w - cw) / 2}px`;
-    frame.style.top = `${(shown.h - ch) / 2}px`;
-    zoomImg.style.width = `${shown.w * scale}px`;
-    zoomImg.style.height = `${shown.h * scale}px`;
-    zoomImg.style.left = `${-bx / NATURAL.w * shown.w * scale}px`;
-    zoomImg.style.top = `${-by / NATURAL.h * shown.h * scale}px`;
-    zoom.hidden = false;
+    // 每个屏幕像素对应多少个原图像素
+    const scale = NATURAL.w / shown.w;
+    // 面板尽量和照片一样大，右边放不下就按剩下的空间缩
+    const room = document.documentElement.clientWidth - viewer.getBoundingClientRect().right - 24;
+    const panelW = Math.max(120, Math.min(shown.w, room));
+    const panelH = shown.h;
+    // 取景框在屏幕上的尺寸：面板尺寸换算回照片上
+    const lensW = Math.min(shown.w, panelW / scale), lensH = Math.min(shown.h, panelH / scale);
+    const r = svgOverlay.getBoundingClientRect();
+    const cx = event.clientX - r.left, cy = event.clientY - r.top;
+    const lx = Math.min(Math.max(cx - lensW / 2, 0), shown.w - lensW);
+    const ly = Math.min(Math.max(cy - lensH / 2, 0), shown.h - lensH);
+    lens.style.left = `${lx}px`;
+    lens.style.top = `${ly}px`;
+    lens.style.width = `${lensW}px`;
+    lens.style.height = `${lensH}px`;
+    panel.style.width = `${panelW}px`;
+    panel.style.height = `${panelH}px`;
+    panel.style.backgroundSize = `${NATURAL.w}px ${NATURAL.h}px`;
+    panel.style.backgroundPosition = `${-lx * scale}px ${-ly * scale}px`;
+    lens.hidden = false;
+    panel.hidden = false;
   }
-  function hideZoom() {
-    zoom.hidden = true;
+  function hideLens() {
+    lens.hidden = true;
+    panel.hidden = true;
   }
-  document.querySelectorAll("rect[data-id]").forEach((el) => {
-    el.addEventListener("mouseenter", () => {
-      // 画框模式下不放大；只显示命中时，没命中的框是看不见的，也不放大
-      if (viewer.classList.contains("drawing")) return;
-      if (viewer.classList.contains("has-hits") && !el.classList.contains("hit")) return;
-      showZoom(el);
-    });
-    el.addEventListener("mouseleave", hideZoom);
+  svgOverlay.addEventListener("pointermove", (event) => {
+    // 触屏没有悬停；画框模式下照片上的拖动另有用途
+    if (event.pointerType === "touch" || viewer.classList.contains("drawing")) return hideLens();
+    moveLens(event);
   });
+  svgOverlay.addEventListener("pointerleave", hideLens);
 </script>
 
 </main>
