@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>搜索 · 找书</title>
+<style>
+  :root {
+    --bg: #f6f3ee; --fg: #222; --muted: #777; --card: #fff; --line: #ddd6cc;
+    --accent: #c2410c; --accent-soft: rgba(194, 65, 12, 0.18); --hit-text: #d6006f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1a18; --fg: #eee; --muted: #999; --card: #262421; --line: #3a3733;
+      --accent: #fb923c; --accent-soft: rgba(251, 146, 60, 0.22); --hit-text: #ff5db1;
+    }
+  }
+  * { box-sizing: border-box; }
+  /* .row 这类 display: flex 的规则会盖过浏览器自带的 [hidden] 规则，这里把 hidden 属性重新立起来 */
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  a { color: var(--accent); text-decoration: none; }
+  h1 { font-size: 1.4rem; margin: 0 0 12px; }
+  h2 { font-size: 1.1rem; margin: 24px 0 8px; }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  form.inline { display: inline; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input[type=text], input[type=search] { flex: 1; min-width: 0; padding: 8px 10px; font-size: 1rem;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
+  button { padding: 8px 14px; font-size: 1rem; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--card); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  ul.plain { list-style: none; padding: 0; margin: 0; }
+  ul.plain li { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  nav { margin-bottom: 12px; }
+  /* 类型标签：小圆角底色块 */
+  .tag { display: inline-block; font-size: 0.78rem; font-weight: normal; line-height: 1.4; padding: 0 6px;
+    margin-left: 4px; border-radius: 999px; background: var(--accent-soft); color: var(--fg); white-space: nowrap; }
+  .tag-cloud { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+  .tag-cloud .tag { font-size: 0.95rem; padding: 2px 10px; margin: 0; }
+  .tag small { color: var(--muted); }
+  /* 豆瓣绿，和命中的洋红色区分开 */
+  a.douban { white-space: nowrap; font-size: 0.85rem; font-weight: normal; color: #2e963d; margin-left: 6px; }
+</style>
+</head>
+<body data-page="search" data-root="">
+<main>
+  <nav><a href="index.html" id="nav-back">← 全部照片</a></nav>
+  
+<form class="row card" action="search.html" method="get">
+  <input type="search" name="q" required>
+  <button class="primary">搜索</button>
+</form>
+
+<div id="results"></div>
+
+</main>
+<script src="data.js"></script>
+<script src="site.js"></script>
+</body>
+</html>

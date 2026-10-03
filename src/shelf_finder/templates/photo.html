@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}{{ photo.name }} · 找书{% endblock %}
+{% block content %}
+<style>
+{% include "partials/viewer_style.html" %}
+  /* 画框模式：盖住照片接收拖动，正在画的框用黄色 */
+  .viewer.drawing svg { touch-action: none; cursor: crosshair; }
+  .viewer.drawing rect[data-id] { pointer-events: none; }
+  .viewer rect.draft { stroke: #ffd60a; stroke-width: 4; stroke-dasharray: 10 6; fill: rgba(255, 214, 10, 0.25); pointer-events: none;
+    filter: drop-shadow(0 0 1.5px #000); }
+  #title { margin-bottom: 12px; }
+  #title button { padding: 2px 10px; font-size: 0.85rem; }
+  #rename-form { margin-bottom: 12px; }
+  #spines li .tools { white-space: nowrap; visibility: hidden; margin-left: auto; }
+  #spines li:hover .tools, #spines li.active .tools { visibility: visible; }
+  #spines li .tools button { padding: 2px 8px; font-size: 0.85rem; }
+  #spines li.editor { display: block; cursor: default; background: var(--accent-soft); }
+  .editor form { display: flex; flex-direction: column; gap: 6px; }
+  .editor .hint { font-size: 0.85rem; color: var(--muted); }
+  .editor .hint.ready { color: var(--hit-text); }
+</style>
+
+<div class="row" id="title">
+  <h1 style="margin: 0">{{ photo.name }}</h1>
+  <button type="button" id="rename-button" title="改名">改名</button>
+</div>
+<form class="row card" id="rename-form" action="/photos/{{ photo.id }}/rename" method="post" hidden>
+  <input type="text" name="name" value="{{ photo.name }}" required>
+  <button class="primary">保存</button>
+  <button type="button" id="rename-cancel">取消</button>
+</form>
+<form class="row card" action="/photos/{{ photo.id }}" method="get">
+  <input type="search" name="q" value="{{ q }}" placeholder="在这张照片里找">
+  <button class="primary">找</button>
+</form>
+{% if q %}
+<p class="muted">{% if hit_ids %}「{{ q }}」在这张照片上命中 {{ hit_ids | length }} 本书。{% else %}这张照片上没有「{{ q }}」。{% endif %}</p>
+{% endif %}
+
+<div class="layout" style="margin-top: 12px" id="layout">
+  <div class="viewer-col">
+  <div class="viewer{% if hit_ids %} has-hits{% endif %}" id="viewer">
+    <img src="/photos/{{ photo.id }}/image" alt="{{ photo.name }}">
+    <svg id="overlay" viewBox="0 0 {{ photo.width }} {{ photo.height }}" preserveAspectRatio="none">
+      {% for spine_id, spine in spines %}
+      <rect data-id="{{ spine_id }}" class="{% if spine_id in hit_ids %}hit{% endif %}"
+            x="{{ spine.box.x1 }}" y="{{ spine.box.y1 }}"
+            width="{{ spine.box.x2 - spine.box.x1 }}" height="{{ spine.box.y2 - spine.box.y1 }}"><title>{{ spine.text }}</title></rect>
+      {% endfor %}
+      <rect class="draft" id="draft" x="0" y="0" width="0" height="0" visibility="hidden"></rect>
+    </svg>
+    {# 鼠标停在某个框上时，把那条书脊放大后盖在照片上 #}
+    <div id="zoom" hidden><img src="/photos/{{ photo.id }}/image" alt=""></div>
+  </div>
+  </div>
+  <div class="spine-col">
+    <ul class="plain card" id="spines">
+      {% for spine_id, spine in spines %}
+      <li id="spine-{{ spine_id }}" data-id="{{ spine_id }}" class="{% if spine_id in hit_ids %}hit{% endif %}">
+        <span class="text">{{ spine.text }}</span>
+        <span class="meta">
+          <span class="tags">{% for tag in spine.tags %}<a class="tag" href="/search?q={{ tag | urlencode }}">{{ tag }}</a>{% endfor %}</span>
+          <a class="douban" href="{{ douban[spine_id] }}" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          <span class="tools">
+            <button type="button" data-act="edit">改</button>
+            <button type="button" data-act="insert">插入</button>
+            <form class="inline" action="/photos/{{ photo.id }}/spines/{{ spine_id }}/delete" method="post"
+                  onsubmit="return confirm('删除这一行？')"><button data-act="delete">删</button></form>
+          </span>
+        </span>
+      </li>
+      {% else %}
+      <li class="muted">这张照片上没有识别出书脊。</li>
+      {% endfor %}
+    </ul>
+    <div class="row" style="margin-top: 12px">
+      {% if recognition %}
+      <form class="inline" action="/photos/{{ photo.id }}/recognize" method="post"
+            onsubmit="return confirm('重新识别会用识别结果替换这张照片的全部书脊{% if manual_edits %}，包括手工改过的 {{ manual_edits }} 行{% endif %}。继续？')"><button>重新识别</button></form>
+      {% endif %}
+      <form class="inline" action="/photos/{{ photo.id }}/delete" method="post"
+            onsubmit="return confirm('删除这张照片和它的全部书脊？')"><button>删除照片</button></form>
+    </div>
+    <p class="muted">共 {{ spines | length }} 本书{% if manual_edits %}，其中手工改过 {{ manual_edits }} 行{% endif %}，上传于 {{ photo.created_at.replace("T", " ") }}。</p>
+  </div>
+</div>
+
+{% if vocabulary %}
+<datalist id="vocabulary">{% for tag in vocabulary %}<option>{{ tag }}</option>{% endfor %}</datalist>
+{% endif %}
+
+<template id="editor-template">
+  <li class="editor">
+    <form method="post">
+      <input type="text" name="text" required placeholder="书脊上的文字：书名 作者 出版社">
+      {% if vocabulary %}
+      <input type="text" name="tags" list="vocabulary" placeholder="类型标签，一到三个，用顿号隔开">
+      {% endif %}
+      <input type="hidden" name="x1"><input type="hidden" name="y1"><input type="hidden" name="x2"><input type="hidden" name="y2">
+      <span class="hint"></span>
+      <span class="row">
+        <button type="submit" class="primary">保存</button>
+        <button type="button" data-act="cancel">取消</button>
+      </span>
+    </form>
+  </li>
+</template>
+
+{% include "partials/viewer_script.html" %}
+<script>
+  const PHOTO = {{ photo.id }};
+  const overlay = document.getElementById("overlay");
+  const draft = document.getElementById("draft");
+
+  // 点「改名」把标题换成输入框，取消就换回来
+  const renameForm = document.getElementById("rename-form");
+  document.getElementById("rename-button").addEventListener("click", () => {
+    document.getElementById("title").hidden = true;
+    renameForm.hidden = false;
+    renameForm.name.focus();
+    renameForm.name.select();
+  });
+  document.getElementById("rename-cancel").addEventListener("click", () => {
+    renameForm.hidden = true;
+    document.getElementById("title").hidden = false;
+  });
+
+  // 同一时间只开一个编辑框；drawing 时在照片上拖动画出新框
+  let editor = null;
+  function closeEditor() {
+    if (!editor) return;
+    editor.remove();
+    editor = null;
+    viewer.classList.remove("drawing");
+    draft.setAttribute("visibility", "hidden");
+  }
+  function openEditor(li, mode) {
+    closeEditor();
+    const id = li.dataset.id;
+    editor = document.getElementById("editor-template").content.firstElementChild.cloneNode(true);
+    const form = editor.querySelector("form");
+    const hint = editor.querySelector(".hint");
+    if (mode === "edit") {
+      form.action = `/photos/${PHOTO}/spines/${id}/update`;
+      form.text.value = li.querySelector(".text").textContent.trim();
+      if (form.tags) form.tags.value = [...li.querySelectorAll(".tag")].map((t) => t.textContent).join("、");
+      hint.textContent = "改文字或标签后保存；要改位置就在照片上重新拖一个框。";
+      li.after(editor);
+    } else {
+      form.action = `/photos/${PHOTO}/spines/${id}/insert`;
+      hint.textContent = "先在照片上按住拖出这本书的范围，再保存。";
+      li.after(editor);
+    }
+    form.addEventListener("submit", (event) => {
+      if (mode === "insert" && !form.x1.value) {
+        event.preventDefault();
+        hint.textContent = "还没有在照片上框出这本书的位置。";
+      }
+    });
+    editor.querySelector('[data-act="cancel"]').addEventListener("click", closeEditor);
+    viewer.classList.add("drawing");
+    form.text.focus();
+    activate(id, false);
+  }
+  document.querySelectorAll('#spines [data-act="edit"]').forEach((b) => b.addEventListener("click", () => openEditor(b.closest("li"), "edit")));
+  document.querySelectorAll('#spines [data-act="insert"]').forEach((b) => b.addEventListener("click", () => openEditor(b.closest("li"), "insert")));
+
+  // 把指针位置换算成照片像素坐标
+  function imagePoint(event) {
+    const r = overlay.getBoundingClientRect();
+    const x = Math.round(Math.min(Math.max((event.clientX - r.left) / r.width, 0), 1) * NATURAL.w);
+    const y = Math.round(Math.min(Math.max((event.clientY - r.top) / r.height, 0), 1) * NATURAL.h);
+    return { x, y };
+  }
+  let start = null;
+  overlay.addEventListener("pointerdown", (event) => {
+    if (!viewer.classList.contains("drawing")) return;
+    event.preventDefault();
+    overlay.setPointerCapture(event.pointerId);
+    start = imagePoint(event);
+    draft.setAttribute("visibility", "visible");
+    updateDraft(start);
+  });
+  function updateDraft(p) {
+    const x1 = Math.min(start.x, p.x), y1 = Math.min(start.y, p.y);
+    const x2 = Math.max(start.x, p.x), y2 = Math.max(start.y, p.y);
+    draft.setAttribute("x", x1); draft.setAttribute("y", y1);
+    draft.setAttribute("width", x2 - x1); draft.setAttribute("height", y2 - y1);
+    return { x1, y1, x2, y2 };
+  }
+  overlay.addEventListener("pointermove", (event) => {
+    if (start) updateDraft(imagePoint(event));
+  });
+  overlay.addEventListener("pointerup", (event) => {
+    if (!start) return;
+    const box = updateDraft(imagePoint(event));
+    start = null;
+    if (!editor || box.x2 - box.x1 < 4 || box.y2 - box.y1 < 4) return;
+    const form = editor.querySelector("form");
+    for (const k of ["x1", "y1", "x2", "y2"]) form[k].value = box[k];
+    const hint = editor.querySelector(".hint");
+    hint.textContent = "框已画好，保存即可。";
+    hint.classList.add("ready");
+  });
+</script>
+{% endblock %}

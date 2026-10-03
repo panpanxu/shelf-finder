@@ -1,0 +1,37 @@
+  /* 图片和覆盖层叠在同一个网格单元里，覆盖层的尺寸永远等于图片实际显示的尺寸 */
+  .viewer { display: grid; line-height: 0; max-width: 100%; }
+  .viewer > * { grid-area: 1 / 1; }
+  .viewer img { display: block; max-width: 100%; width: auto; height: auto; border-radius: 6px; }
+  .viewer svg { width: 100%; height: 100%; }
+  /* 放大镜：和图片叠在同一个网格单元里，自己定位；不接鼠标事件，免得遮住触发它的框 */
+  #zoom { position: relative; pointer-events: none; z-index: 1; justify-self: start; align-self: start; }
+  #zoom > div { position: absolute; overflow: hidden; border: 2px solid #fff; border-radius: 4px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5); background: #000; }
+  /* 放大用的图不受 .viewer img 的最大宽高限制，否则被压回原尺寸后只剩黑框 */
+  #zoom img { position: absolute; display: block; max-width: none; max-height: none; border-radius: 0; }
+  /* 框画在照片上，颜色不随明暗主题变：亮绿配黑色描边投影，在木色书架和深色书脊上都显眼 */
+  .viewer rect { fill: transparent; stroke: #39ff14; stroke-width: 3; vector-effect: non-scaling-stroke; cursor: pointer;
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer.has-hits rect { stroke: none; filter: none; }
+  .viewer rect.hit { stroke: #ff2d95; stroke-width: 4; fill: rgba(255, 45, 149, 0.28);
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer rect.active, .viewer.has-hits rect.active { stroke: #ff2d95; stroke-width: 6; fill: rgba(255, 45, 149, 0.4);
+    filter: drop-shadow(0 0 2px #000) drop-shadow(0 0 2px #000); }
+  /* 桌面宽度：整块布局占满视口剩余高度，图片在左栏居中、不随页面滚动，右栏列表在自己的范围里滚动。
+     --layout-top 是布局距离页面顶部的距离，由脚本量出来。 */
+  .layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+  .viewer-col { display: flex; align-items: center; justify-content: center; min-height: 0; }
+  @media (min-width: 761px) {
+    .layout { --available: calc(100dvh - var(--layout-top, 0px) - 16px); height: var(--available); }
+    .viewer-col { height: 100%; }
+    .viewer img { max-height: var(--available); }
+    .spine-col { height: 100%; overflow-y: auto; min-height: 0; }
+  }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+  /* 每本书两行：第一行书名和文字，第二行标签、豆瓣链接（和操作按钮） */
+  #spines li { cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+  #spines li .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-weight: normal; color: var(--fg); }
+  #spines li .meta .tags { display: flex; gap: 4px; flex-wrap: wrap; }
+  #spines li .meta .tag { margin-left: 0; }
+  #spines li.hit { font-weight: 600; color: var(--hit-text); border-left: 4px solid var(--hit-text); }
+  #spines li.active { background: var(--accent-soft); }

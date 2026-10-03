@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>南房东第五层内 · 找书</title>
+<style>
+  :root {
+    --bg: #f6f3ee; --fg: #222; --muted: #777; --card: #fff; --line: #ddd6cc;
+    --accent: #c2410c; --accent-soft: rgba(194, 65, 12, 0.18); --hit-text: #d6006f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1a18; --fg: #eee; --muted: #999; --card: #262421; --line: #3a3733;
+      --accent: #fb923c; --accent-soft: rgba(251, 146, 60, 0.22); --hit-text: #ff5db1;
+    }
+  }
+  * { box-sizing: border-box; }
+  /* .row 这类 display: flex 的规则会盖过浏览器自带的 [hidden] 规则，这里把 hidden 属性重新立起来 */
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  a { color: var(--accent); text-decoration: none; }
+  h1 { font-size: 1.4rem; margin: 0 0 12px; }
+  h2 { font-size: 1.1rem; margin: 24px 0 8px; }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  form.inline { display: inline; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input[type=text], input[type=search] { flex: 1; min-width: 0; padding: 8px 10px; font-size: 1rem;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
+  button { padding: 8px 14px; font-size: 1rem; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--card); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  ul.plain { list-style: none; padding: 0; margin: 0; }
+  ul.plain li { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  nav { margin-bottom: 12px; }
+  /* 类型标签：小圆角底色块 */
+  .tag { display: inline-block; font-size: 0.78rem; font-weight: normal; line-height: 1.4; padding: 0 6px;
+    margin-left: 4px; border-radius: 999px; background: var(--accent-soft); color: var(--fg); white-space: nowrap; }
+  .tag-cloud { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+  .tag-cloud .tag { font-size: 0.95rem; padding: 2px 10px; margin: 0; }
+  .tag small { color: var(--muted); }
+  /* 豆瓣绿，和命中的洋红色区分开 */
+  a.douban { white-space: nowrap; font-size: 0.85rem; font-weight: normal; color: #2e963d; margin-left: 6px; }
+</style>
+</head>
+<body data-page="photo" data-root="../">
+<main>
+  <nav><a href="../index.html" id="nav-back">← 全部照片</a></nav>
+  
+<style>
+  /* 图片和覆盖层叠在同一个网格单元里，覆盖层的尺寸永远等于图片实际显示的尺寸 */
+  .viewer { display: grid; line-height: 0; max-width: 100%; }
+  .viewer > * { grid-area: 1 / 1; }
+  .viewer img { display: block; max-width: 100%; width: auto; height: auto; border-radius: 6px; }
+  .viewer svg { width: 100%; height: 100%; }
+  /* 放大镜：和图片叠在同一个网格单元里，自己定位；不接鼠标事件，免得遮住触发它的框 */
+  #zoom { position: relative; pointer-events: none; z-index: 1; justify-self: start; align-self: start; }
+  #zoom > div { position: absolute; overflow: hidden; border: 2px solid #fff; border-radius: 4px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5); background: #000; }
+  /* 放大用的图不受 .viewer img 的最大宽高限制，否则被压回原尺寸后只剩黑框 */
+  #zoom img { position: absolute; display: block; max-width: none; max-height: none; border-radius: 0; }
+  /* 框画在照片上，颜色不随明暗主题变：亮绿配黑色描边投影，在木色书架和深色书脊上都显眼 */
+  .viewer rect { fill: transparent; stroke: #39ff14; stroke-width: 3; vector-effect: non-scaling-stroke; cursor: pointer;
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer.has-hits rect { stroke: none; filter: none; }
+  .viewer rect.hit { stroke: #ff2d95; stroke-width: 4; fill: rgba(255, 45, 149, 0.28);
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer rect.active, .viewer.has-hits rect.active { stroke: #ff2d95; stroke-width: 6; fill: rgba(255, 45, 149, 0.4);
+    filter: drop-shadow(0 0 2px #000) drop-shadow(0 0 2px #000); }
+  /* 桌面宽度：整块布局占满视口剩余高度，图片在左栏居中、不随页面滚动，右栏列表在自己的范围里滚动。
+     --layout-top 是布局距离页面顶部的距离，由脚本量出来。 */
+  .layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+  .viewer-col { display: flex; align-items: center; justify-content: center; min-height: 0; }
+  @media (min-width: 761px) {
+    .layout { --available: calc(100dvh - var(--layout-top, 0px) - 16px); height: var(--available); }
+    .viewer-col { height: 100%; }
+    .viewer img { max-height: var(--available); }
+    .spine-col { height: 100%; overflow-y: auto; min-height: 0; }
+  }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+  /* 每本书两行：第一行书名和文字，第二行标签、豆瓣链接（和操作按钮） */
+  #spines li { cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+  #spines li .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-weight: normal; color: var(--fg); }
+  #spines li .meta .tags { display: flex; gap: 4px; flex-wrap: wrap; }
+  #spines li .meta .tag { margin-left: 0; }
+  #spines li.hit { font-weight: 600; color: var(--hit-text); border-left: 4px solid var(--hit-text); }
+  #spines li.active { background: var(--accent-soft); }
+</style>
+
+<h1>南房东第五层内</h1>
+<form class="row card" action="11.html" method="get">
+  <input type="search" name="q" placeholder="在这张照片里找">
+  <button class="primary">找</button>
+</form>
+<p class="muted" id="hit-note" hidden></p>
+
+<div class="layout" style="margin-top: 12px" id="layout" data-photo="11">
+  <div class="viewer-col">
+  <div class="viewer" id="viewer">
+    <img src="11.jpg" alt="南房东第五层内">
+    <svg id="overlay" viewBox="0 0 2000 922" preserveAspectRatio="none">
+      
+      <rect data-id="403" x="240" y="96"
+            width="554" height="42"><title>杜甫的五城：一位唐史学者的寻踪壮游 清华大学出版社</title></rect>
+      
+      <rect data-id="404" x="271" y="365"
+            width="115" height="491"><title>中国古典诗词感发 顾随讲 叶嘉莹笔记</title></rect>
+      
+      <rect data-id="405" x="345" y="191"
+            width="100" height="21"><title>瓦尔登湖  LIFE IN THE WOODS</title></rect>
+      
+      <rect data-id="406" x="360" y="406"
+            width="46" height="116"><title>满天星斗</title></rect>
+      
+      <rect data-id="407" x="364" y="254"
+            width="205" height="47"><title>照夜白：山水、折叠、循环、拼贴、时空的诗学</title></rect>
+      
+      <rect data-id="409" x="431" y="489"
+            width="144" height="245"><title>定名与相知：博物馆参观记 二编 扬之水</title></rect>
+      
+      <rect data-id="410" x="548" y="171"
+            width="91" height="675"><title>中国文明起源新探 苏秉琦著 生活·读书·新知三联书店</title></rect>
+      
+      <rect data-id="411" x="618" y="397"
+            width="76" height="341"><title>金叶：来自金枝的故事 Leaves From The Golden Bough</title></rect>
+      
+      <rect data-id="412" x="689" y="362"
+            width="146" height="466"><title>黑羊灰鹰：巴尔干六百年，一次苦难与希望的探索之旅 中信出版集团 BLACK LAMB AND GREY FALCON</title></rect>
+      
+      <rect data-id="413" x="866" y="350"
+            width="35" height="386"><title>沈从文的湘西故事：学历史的地方 沈从文著 卓雅摄影</title></rect>
+      
+      <rect data-id="414" x="937" y="714"
+            width="35" height="84"><title>古建奇谈：打开古建筑</title></rect>
+      
+      <rect data-id="432" x="978" y="402"
+            width="39" height="286"><title>如何阅读一本小说 （美）托马斯·福斯特</title></rect>
+      
+      <rect data-id="433" x="1036" y="393"
+            width="30" height="300"><title>如何阅读一本文学书 （美）托马斯·福斯特</title></rect>
+      
+      <rect data-id="416" x="1069" y="372"
+            width="61" height="441"><title>失落之城：四座世界古城的生与死</title></rect>
+      
+      <rect data-id="417" x="1147" y="385"
+            width="52" height="430"><title>我已与一万亿株白桦相逢：西伯利亚铁路纪行 胡成著 广东人民出版社</title></rect>
+      
+      <rect data-id="418" x="1204" y="439"
+            width="46" height="208"><title>天生有罪：特雷弗·诺亚的变色人生 Born a Crime</title></rect>
+      
+      <rect data-id="420" x="1233" y="168"
+            width="334" height="49"><title>小红书运营实战一本通：账号运营+内容策划+推广引流</title></rect>
+      
+      <rect data-id="421" x="1239" y="253"
+            width="451" height="68"><title>春秋公羊传 全本全译 岳麓书社</title></rect>
+      
+      <rect data-id="422" x="1254" y="209"
+            width="477" height="59"><title>寻找时间的边缘：黑洞、白洞和虫洞 城南出版社</title></rect>
+      
+      <rect data-id="424" x="1260" y="370"
+            width="46" height="416"><title>许倬云十日谈</title></rect>
+      
+      <rect data-id="425" x="1292" y="104"
+            width="239" height="38"><title>尼采：在世纪的转折点上 周国平</title></rect>
+      
+      <rect data-id="426" x="1318" y="406"
+            width="110" height="222"><title>孤独六讲 品味四讲 lectures Six</title></rect>
+      
+      <rect data-id="427" x="1429" y="391"
+            width="100" height="291"><title>改变历史的香料商人 达洛维夫人</title></rect>
+      
+      <rect data-id="429" x="1518" y="331"
+            width="80" height="311"><title>秦汉工匠 Artisans in Early Imperial</title></rect>
+      
+      <rect data-id="430" x="1613" y="380"
+            width="74" height="104"><title>扬州八怪传 盐香风色</title></rect>
+      
+    </svg>
+    <div id="zoom" hidden><img src="11.jpg" alt=""></div>
+  </div>
+  </div>
+  <div class="spine-col">
+    <ul class="plain card" id="spines">
+      
+      <li id="spine-403" data-id="403">
+        <span class="text">杜甫的五城：一位唐史学者的寻踪壮游 清华大学出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%9D%9C%E7%94%AB%E7%9A%84%E4%BA%94%E5%9F%8E%EF%BC%9A%E4%B8%80%E4%BD%8D%E5%94%90%E5%8F%B2%E5%AD%A6%E8%80%85%E7%9A%84%E5%AF%BB%E8%B8%AA%E5%A3%AE%E6%B8%B8+%E6%B8%85%E5%8D%8E%E5%A4%A7%E5%AD%A6%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="杜甫的五城：一位唐史学者的寻踪壮游 清华大学出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-404" data-id="404">
+        <span class="text">中国古典诗词感发 顾随讲 叶嘉莹笔记</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%AF%97%E8%AF%8D%E6%95%A3%E6%96%87">诗词散文</a><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E4%B8%AD%E5%9B%BD%E5%8F%A4%E5%85%B8%E8%AF%97%E8%AF%8D%E6%84%9F%E5%8F%91+%E9%A1%BE%E9%9A%8F%E8%AE%B2+%E5%8F%B6%E5%98%89%E8%8E%B9%E7%AC%94%E8%AE%B0&amp;cat=1001" data-query="中国古典诗词感发 顾随讲 叶嘉莹笔记" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-405" data-id="405">
+        <span class="text">瓦尔登湖  LIFE IN THE WOODS</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%93%A6%E5%B0%94%E7%99%BB%E6%B9%96&amp;cat=1001" data-query="瓦尔登湖" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-406" data-id="406">
+        <span class="text">满天星斗</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%BB%A1%E5%A4%A9%E6%98%9F%E6%96%97&amp;cat=1001" data-query="满天星斗" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-407" data-id="407">
+        <span class="text">照夜白：山水、折叠、循环、拼贴、时空的诗学</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%89%BA%E6%9C%AF%E8%AE%BE%E8%AE%A1">艺术设计</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%85%A7%E5%A4%9C%E7%99%BD%EF%BC%9A%E5%B1%B1%E6%B0%B4%E3%80%81%E6%8A%98%E5%8F%A0%E3%80%81%E5%BE%AA%E7%8E%AF%E3%80%81%E6%8B%BC%E8%B4%B4%E3%80%81%E6%97%B6%E7%A9%BA%E7%9A%84%E8%AF%97%E5%AD%A6&amp;cat=1001" data-query="照夜白：山水、折叠、循环、拼贴、时空的诗学" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-409" data-id="409">
+        <span class="text">定名与相知：博物馆参观记 二编 扬之水</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%AE%9A%E5%90%8D%E4%B8%8E%E7%9B%B8%E7%9F%A5%EF%BC%9A%E5%8D%9A%E7%89%A9%E9%A6%86%E5%8F%82%E8%A7%82%E8%AE%B0+%E4%BA%8C+%E6%89%AC%E4%B9%8B%E6%B0%B4&amp;cat=1001" data-query="定名与相知：博物馆参观记 二 扬之水" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-410" data-id="410">
+        <span class="text">中国文明起源新探 苏秉琦著 生活·读书·新知三联书店</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E7%A4%BE%E4%BC%9A%E7%A7%91%E5%AD%A6">社会科学</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E4%B8%AD%E5%9B%BD%E6%96%87%E6%98%8E%E8%B5%B7%E6%BA%90%E6%96%B0%E6%8E%A2+%E8%8B%8F%E7%A7%89%E7%90%A6+%E7%94%9F%E6%B4%BB%C2%B7%E8%AF%BB%E4%B9%A6%C2%B7%E6%96%B0%E7%9F%A5%E4%B8%89%E8%81%94%E4%B9%A6%E5%BA%97&amp;cat=1001" data-query="中国文明起源新探 苏秉琦 生活·读书·新知三联书店" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-411" data-id="411">
+        <span class="text">金叶：来自金枝的故事 Leaves From The Golden Bough</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%87%91%E5%8F%B6%EF%BC%9A%E6%9D%A5%E8%87%AA%E9%87%91%E6%9E%9D%E7%9A%84%E6%95%85%E4%BA%8B&amp;cat=1001" data-query="金叶：来自金枝的故事" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-412" data-id="412">
+        <span class="text">黑羊灰鹰：巴尔干六百年，一次苦难与希望的探索之旅 中信出版集团 BLACK LAMB AND GREY FALCON</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%96%E7%95%8C%E5%8E%86%E5%8F%B2">世界历史</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%BB%91%E7%BE%8A%E7%81%B0%E9%B9%B0%EF%BC%9A%E5%B7%B4%E5%B0%94%E5%B9%B2%E5%85%AD%E7%99%BE%E5%B9%B4%EF%BC%8C%E4%B8%80%E6%AC%A1%E8%8B%A6%E9%9A%BE%E4%B8%8E%E5%B8%8C%E6%9C%9B%E7%9A%84%E6%8E%A2%E7%B4%A2%E4%B9%8B%E6%97%85+%E4%B8%AD%E4%BF%A1%E5%87%BA%E7%89%88%E9%9B%86%E5%9B%A2&amp;cat=1001" data-query="黑羊灰鹰：巴尔干六百年，一次苦难与希望的探索之旅 中信出版集团" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-413" data-id="413">
+        <span class="text">沈从文的湘西故事：学历史的地方 沈从文著 卓雅摄影</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%B2%88%E4%BB%8E%E6%96%87%E7%9A%84%E6%B9%98%E8%A5%BF%E6%95%85%E4%BA%8B%EF%BC%9A%E5%AD%A6%E5%8E%86%E5%8F%B2%E7%9A%84%E5%9C%B0%E6%96%B9+%E6%B2%88%E4%BB%8E%E6%96%87+%E5%8D%93%E9%9B%85%E6%91%84%E5%BD%B1&amp;cat=1001" data-query="沈从文的湘西故事：学历史的地方 沈从文 卓雅摄影" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-414" data-id="414">
+        <span class="text">古建奇谈：打开古建筑</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%89%BA%E6%9C%AF%E8%AE%BE%E8%AE%A1">艺术设计</a><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8F%A4%E5%BB%BA%E5%A5%87%E8%B0%88%EF%BC%9A%E6%89%93%E5%BC%80%E5%8F%A4%E5%BB%BA%E7%AD%91&amp;cat=1001" data-query="古建奇谈：打开古建筑" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-432" data-id="432">
+        <span class="text">如何阅读一本小说 （美）托马斯·福斯特</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%A6%82%E4%BD%95%E9%98%85%E8%AF%BB%E4%B8%80%E6%9C%AC%E5%B0%8F%E8%AF%B4+%E6%89%98%E9%A9%AC%E6%96%AF%C2%B7%E7%A6%8F%E6%96%AF%E7%89%B9&amp;cat=1001" data-query="如何阅读一本小说 托马斯·福斯特" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-433" data-id="433">
+        <span class="text">如何阅读一本文学书 （美）托马斯·福斯特</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%A6%82%E4%BD%95%E9%98%85%E8%AF%BB%E4%B8%80%E6%9C%AC%E6%96%87%E5%AD%A6%E4%B9%A6+%E6%89%98%E9%A9%AC%E6%96%AF%C2%B7%E7%A6%8F%E6%96%AF%E7%89%B9&amp;cat=1001" data-query="如何阅读一本文学书 托马斯·福斯特" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-416" data-id="416">
+        <span class="text">失落之城：四座世界古城的生与死</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%96%E7%95%8C%E5%8E%86%E5%8F%B2">世界历史</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%A4%B1%E8%90%BD%E4%B9%8B%E5%9F%8E%EF%BC%9A%E5%9B%9B%E5%BA%A7%E4%B8%96%E7%95%8C%E5%8F%A4%E5%9F%8E%E7%9A%84%E7%94%9F%E4%B8%8E%E6%AD%BB&amp;cat=1001" data-query="失落之城：四座世界古城的生与死" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-417" data-id="417">
+        <span class="text">我已与一万亿株白桦相逢：西伯利亚铁路纪行 胡成著 广东人民出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%88%91%E5%B7%B2%E4%B8%8E%E4%B8%80%E4%B8%87%E4%BA%BF%E6%A0%AA%E7%99%BD%E6%A1%A6%E7%9B%B8%E9%80%A2%EF%BC%9A%E8%A5%BF%E4%BC%AF%E5%88%A9%E4%BA%9A%E9%93%81%E8%B7%AF%E7%BA%AA%E8%A1%8C+%E8%83%A1%E6%88%90+%E5%B9%BF%E4%B8%9C%E4%BA%BA%E6%B0%91%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="我已与一万亿株白桦相逢：西伯利亚铁路纪行 胡成 广东人民出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-418" data-id="418">
+        <span class="text">天生有罪：特雷弗·诺亚的变色人生 Born a Crime</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%A4%A9%E7%94%9F%E6%9C%89%E7%BD%AA%EF%BC%9A%E7%89%B9%E9%9B%B7%E5%BC%97%C2%B7%E8%AF%BA%E4%BA%9A%E7%9A%84%E5%8F%98%E8%89%B2%E4%BA%BA%E7%94%9F&amp;cat=1001" data-query="天生有罪：特雷弗·诺亚的变色人生" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-420" data-id="420">
+        <span class="text">小红书运营实战一本通：账号运营+内容策划+推广引流</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%B0%8F%E7%BA%A2%E4%B9%A6%E8%BF%90%E8%90%A5%E5%AE%9E%E6%88%98%E4%B8%80%E6%9C%AC%E9%80%9A%EF%BC%9A%E8%B4%A6%E5%8F%B7%E8%BF%90%E8%90%A5%2B%E5%86%85%E5%AE%B9%E7%AD%96%E5%88%92%2B%E6%8E%A8%E5%B9%BF%E5%BC%95%E6%B5%81&amp;cat=1001" data-query="小红书运营实战一本通：账号运营+内容策划+推广引流" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-421" data-id="421">
+        <span class="text">春秋公羊传 全本全译 岳麓书社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%98%A5%E7%A7%8B%E5%85%AC%E7%BE%8A%E4%BC%A0+%E5%85%A8%E6%9C%AC%E5%85%A8+%E5%B2%B3%E9%BA%93%E4%B9%A6%E7%A4%BE&amp;cat=1001" data-query="春秋公羊传 全本全 岳麓书社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-422" data-id="422">
+        <span class="text">寻找时间的边缘：黑洞、白洞和虫洞 城南出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E7%A7%91%E6%99%AE">科普</a><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%AF%BB%E6%89%BE%E6%97%B6%E9%97%B4%E7%9A%84%E8%BE%B9%E7%BC%98%EF%BC%9A%E9%BB%91%E6%B4%9E%E3%80%81%E7%99%BD%E6%B4%9E%E5%92%8C%E8%99%AB%E6%B4%9E+%E5%9F%8E%E5%8D%97%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="寻找时间的边缘：黑洞、白洞和虫洞 城南出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-424" data-id="424">
+        <span class="text">许倬云十日谈</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E8%AE%B8%E5%80%AC%E4%BA%91%E5%8D%81%E6%97%A5%E8%B0%88&amp;cat=1001" data-query="许倬云十日谈" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-425" data-id="425">
+        <span class="text">尼采：在世纪的转折点上 周国平</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%B0%BC%E9%87%87%EF%BC%9A%E5%9C%A8%E4%B8%96%E7%BA%AA%E7%9A%84%E8%BD%AC%E6%8A%98%E7%82%B9%E4%B8%8A+%E5%91%A8%E5%9B%BD%E5%B9%B3&amp;cat=1001" data-query="尼采：在世纪的转折点上 周国平" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-426" data-id="426">
+        <span class="text">孤独六讲 品味四讲 lectures Six</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%AD%A4%E7%8B%AC%E5%85%AD%E8%AE%B2+%E5%93%81%E5%91%B3%E5%9B%9B%E8%AE%B2&amp;cat=1001" data-query="孤独六讲 品味四讲" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-427" data-id="427">
+        <span class="text">改变历史的香料商人 达洛维夫人</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%96%E7%95%8C%E5%8E%86%E5%8F%B2">世界历史</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%94%B9%E5%8F%98%E5%8E%86%E5%8F%B2%E7%9A%84%E9%A6%99%E6%96%99%E5%95%86%E4%BA%BA+%E8%BE%BE%E6%B4%9B%E7%BB%B4%E5%A4%AB%E4%BA%BA&amp;cat=1001" data-query="改变历史的香料商人 达洛维夫人" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-429" data-id="429">
+        <span class="text">秦汉工匠 Artisans in Early Imperial</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E8%89%BA%E6%9C%AF%E8%AE%BE%E8%AE%A1">艺术设计</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%A7%A6%E6%B1%89%E5%B7%A5%E5%8C%A0&amp;cat=1001" data-query="秦汉工匠" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-430" data-id="430">
+        <span class="text">扬州八怪传 盐香风色</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a><a class="tag" href="../search.html?q=%E8%89%BA%E6%9C%AF%E8%AE%BE%E8%AE%A1">艺术设计</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%89%AC%E5%B7%9E%E5%85%AB%E6%80%AA%E4%BC%A0+%E7%9B%90%E9%A6%99%E9%A3%8E%E8%89%B2&amp;cat=1001" data-query="扬州八怪传 盐香风色" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+    </ul>
+    <p class="muted">共 25 本书，上传于 2026-10-03 08:55:13。</p>
+  </div>
+</div>
+
+<script>
+  // 量出布局距页面顶部的距离，供样式算出视口里剩余的高度；窗口大小变了重新量
+  const layout = document.getElementById("layout");
+  function measureLayoutTop() {
+    layout.style.setProperty("--layout-top", `${layout.getBoundingClientRect().top + window.scrollY}px`);
+  }
+  measureLayoutTop();
+  window.addEventListener("resize", measureLayoutTop);
+
+  const viewer = document.getElementById("viewer");
+  const photoImg = viewer.querySelector("img");
+  const NATURAL = { w: 2000, h: 922 };
+
+  // 点框或点列表项，两边同时高亮同一本书
+  function activate(id, scroll) {
+    document.querySelectorAll(".active").forEach((el) => el.classList.remove("active"));
+    document.querySelectorAll(`[data-id="${id}"]`).forEach((el) => el.classList.add("active"));
+    if (scroll) document.getElementById(`spine-${id}`).scrollIntoView({ block: "nearest" });
+  }
+  document.querySelectorAll("rect[data-id]").forEach((el) => el.addEventListener("click", () => activate(el.dataset.id, true)));
+  document.querySelectorAll("#spines li[data-id]").forEach((el) => el.addEventListener("click", (event) => {
+    if (event.target.closest(".tools, .douban, .tag")) return;
+    activate(el.dataset.id, false);
+  }));
+  const target = location.hash.match(/^#spine-(\d+)$/);
+  if (target) activate(target[1], true);
+
+  // 鼠标停在框上：把这条书脊放大到与整张图等高（竖排）或等宽（横排），居中盖在照片上；移开就消失
+  const zoom = document.getElementById("zoom");
+  const zoomImg = zoom.querySelector("img");
+  function showZoom(rect) {
+    const shown = { w: photoImg.clientWidth, h: photoImg.clientHeight };
+    const [bx, by, bw, bh] = ["x", "y", "width", "height"].map((k) => Number(rect.getAttribute(k)));
+    // 框在屏幕上的尺寸
+    const sw = bw / NATURAL.w * shown.w, sh = bh / NATURAL.h * shown.h;
+    // 竖排按高放大到整张图的高，横排按宽放大到整张图的宽；另一边不许超出图片
+    const scale = bh >= bw ? Math.min(shown.h / sh, shown.w / sw) : Math.min(shown.w / sw, shown.h / sh);
+    const cw = sw * scale, ch = sh * scale;
+    let frame = zoom.firstElementChild;
+    if (frame.tagName !== "DIV") {
+      frame = document.createElement("div");
+      frame.append(zoomImg);
+      zoom.prepend(frame);
+    }
+    frame.style.width = `${cw}px`;
+    frame.style.height = `${ch}px`;
+    frame.style.left = `${(shown.w - cw) / 2}px`;
+    frame.style.top = `${(shown.h - ch) / 2}px`;
+    zoomImg.style.width = `${shown.w * scale}px`;
+    zoomImg.style.height = `${shown.h * scale}px`;
+    zoomImg.style.left = `${-bx / NATURAL.w * shown.w * scale}px`;
+    zoomImg.style.top = `${-by / NATURAL.h * shown.h * scale}px`;
+    zoom.hidden = false;
+  }
+  function hideZoom() {
+    zoom.hidden = true;
+  }
+  document.querySelectorAll("rect[data-id]").forEach((el) => {
+    el.addEventListener("mouseenter", () => {
+      // 画框模式下不放大；只显示命中时，没命中的框是看不见的，也不放大
+      if (viewer.classList.contains("drawing")) return;
+      if (viewer.classList.contains("has-hits") && !el.classList.contains("hit")) return;
+      showZoom(el);
+    });
+    el.addEventListener("mouseleave", hideZoom);
+  });
+</script>
+
+</main>
+<script src="../data.js"></script>
+<script src="../site.js"></script>
+</body>
+</html>

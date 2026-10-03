@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}找书{% endblock %}</title>
+<style>
+{% include "partials/base_style.html" %}
+</style>
+</head>
+<body>
+<main>
+  {# 从搜索结果点进来的照片页退回搜索结果；搜索结果页回首页时带上关键字，首页的搜索框会把它填回去 #}
+  <nav>
+    {% if q and request.url.path.startswith('/photos/') %}
+    <a href="/search?q={{ q | urlencode }}">← 搜索结果「{{ q }}」</a>
+    {% elif q and request.url.path != '/' %}
+    <a href="/?q={{ q | urlencode }}">← 全部照片</a>
+    {% else %}
+    <a href="/">← 全部照片</a>
+    {% endif %}
+  </nav>
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

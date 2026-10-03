@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>南房第二层 · 找书</title>
+<style>
+  :root {
+    --bg: #f6f3ee; --fg: #222; --muted: #777; --card: #fff; --line: #ddd6cc;
+    --accent: #c2410c; --accent-soft: rgba(194, 65, 12, 0.18); --hit-text: #d6006f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1a18; --fg: #eee; --muted: #999; --card: #262421; --line: #3a3733;
+      --accent: #fb923c; --accent-soft: rgba(251, 146, 60, 0.22); --hit-text: #ff5db1;
+    }
+  }
+  * { box-sizing: border-box; }
+  /* .row 这类 display: flex 的规则会盖过浏览器自带的 [hidden] 规则，这里把 hidden 属性重新立起来 */
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  a { color: var(--accent); text-decoration: none; }
+  h1 { font-size: 1.4rem; margin: 0 0 12px; }
+  h2 { font-size: 1.1rem; margin: 24px 0 8px; }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  form.inline { display: inline; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input[type=text], input[type=search] { flex: 1; min-width: 0; padding: 8px 10px; font-size: 1rem;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
+  button { padding: 8px 14px; font-size: 1rem; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--card); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  ul.plain { list-style: none; padding: 0; margin: 0; }
+  ul.plain li { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  nav { margin-bottom: 12px; }
+  /* 类型标签：小圆角底色块 */
+  .tag { display: inline-block; font-size: 0.78rem; font-weight: normal; line-height: 1.4; padding: 0 6px;
+    margin-left: 4px; border-radius: 999px; background: var(--accent-soft); color: var(--fg); white-space: nowrap; }
+  .tag-cloud { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+  .tag-cloud .tag { font-size: 0.95rem; padding: 2px 10px; margin: 0; }
+  .tag small { color: var(--muted); }
+  /* 豆瓣绿，和命中的洋红色区分开 */
+  a.douban { white-space: nowrap; font-size: 0.85rem; font-weight: normal; color: #2e963d; margin-left: 6px; }
+</style>
+</head>
+<body data-page="photo" data-root="../">
+<main>
+  <nav><a href="../index.html" id="nav-back">← 全部照片</a></nav>
+  
+<style>
+  /* 图片和覆盖层叠在同一个网格单元里，覆盖层的尺寸永远等于图片实际显示的尺寸 */
+  .viewer { display: grid; line-height: 0; max-width: 100%; }
+  .viewer > * { grid-area: 1 / 1; }
+  .viewer img { display: block; max-width: 100%; width: auto; height: auto; border-radius: 6px; }
+  .viewer svg { width: 100%; height: 100%; }
+  /* 放大镜：和图片叠在同一个网格单元里，自己定位；不接鼠标事件，免得遮住触发它的框 */
+  #zoom { position: relative; pointer-events: none; z-index: 1; justify-self: start; align-self: start; }
+  #zoom > div { position: absolute; overflow: hidden; border: 2px solid #fff; border-radius: 4px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5); background: #000; }
+  /* 放大用的图不受 .viewer img 的最大宽高限制，否则被压回原尺寸后只剩黑框 */
+  #zoom img { position: absolute; display: block; max-width: none; max-height: none; border-radius: 0; }
+  /* 框画在照片上，颜色不随明暗主题变：亮绿配黑色描边投影，在木色书架和深色书脊上都显眼 */
+  .viewer rect { fill: transparent; stroke: #39ff14; stroke-width: 3; vector-effect: non-scaling-stroke; cursor: pointer;
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer.has-hits rect { stroke: none; filter: none; }
+  .viewer rect.hit { stroke: #ff2d95; stroke-width: 4; fill: rgba(255, 45, 149, 0.28);
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer rect.active, .viewer.has-hits rect.active { stroke: #ff2d95; stroke-width: 6; fill: rgba(255, 45, 149, 0.4);
+    filter: drop-shadow(0 0 2px #000) drop-shadow(0 0 2px #000); }
+  /* 桌面宽度：整块布局占满视口剩余高度，图片在左栏居中、不随页面滚动，右栏列表在自己的范围里滚动。
+     --layout-top 是布局距离页面顶部的距离，由脚本量出来。 */
+  .layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+  .viewer-col { display: flex; align-items: center; justify-content: center; min-height: 0; }
+  @media (min-width: 761px) {
+    .layout { --available: calc(100dvh - var(--layout-top, 0px) - 16px); height: var(--available); }
+    .viewer-col { height: 100%; }
+    .viewer img { max-height: var(--available); }
+    .spine-col { height: 100%; overflow-y: auto; min-height: 0; }
+  }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+  /* 每本书两行：第一行书名和文字，第二行标签、豆瓣链接（和操作按钮） */
+  #spines li { cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+  #spines li .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-weight: normal; color: var(--fg); }
+  #spines li .meta .tags { display: flex; gap: 4px; flex-wrap: wrap; }
+  #spines li .meta .tag { margin-left: 0; }
+  #spines li.hit { font-weight: 600; color: var(--hit-text); border-left: 4px solid var(--hit-text); }
+  #spines li.active { background: var(--accent-soft); }
+</style>
+
+<h1>南房第二层</h1>
+<form class="row card" action="4.html" method="get">
+  <input type="search" name="q" placeholder="在这张照片里找">
+  <button class="primary">找</button>
+</form>
+<p class="muted" id="hit-note" hidden></p>
+
+<div class="layout" style="margin-top: 12px" id="layout" data-photo="4">
+  <div class="viewer-col">
+  <div class="viewer" id="viewer">
+    <img src="4.jpg" alt="南房第二层">
+    <svg id="overlay" viewBox="0 0 2000 922" preserveAspectRatio="none">
+      
+      <rect data-id="164" x="3" y="745"
+            width="45" height="112"><title>通往威根码头之路 The Road to Wigan Pier 向加泰罗尼亚致敬</title></rect>
+      
+      <rect data-id="165" x="64" y="760"
+            width="23" height="143"><title>焦循书院（人间词话）的哲学基础</title></rect>
+      
+      <rect data-id="166" x="124" y="392"
+            width="20" height="229"><title>OSUX 《古文观止》化读 HEES</title></rect>
+      
+      <rect data-id="167" x="177" y="353"
+            width="283" height="226"><title>文学种子 卡夫卡遗稿集 中国长城建造时 [奥] 果麦</title></rect>
+      
+      <rect data-id="168" x="240" y="385"
+            width="26" height="84"><title>西伯利亚之夏 陀思妥耶夫斯基的</title></rect>
+      
+      <rect data-id="169" x="275" y="372"
+            width="17" height="319"><title>历史的局外人 未方出版社</title></rect>
+      
+      <rect data-id="170" x="328" y="392"
+            width="17" height="155"><title>幸福之路</title></rect>
+      
+      <rect data-id="172" x="401" y="387"
+            width="56" height="157"><title>大家小书 鲁迅作品细读 鲁迅杂文集</title></rect>
+      
+      <rect data-id="175" x="465" y="374"
+            width="21" height="232"><title>中国文化的性格 梁晓声</title></rect>
+      
+      <rect data-id="176" x="503" y="398"
+            width="17" height="100"><title>乞力马扎罗的雪</title></rect>
+      
+      <rect data-id="178" x="541" y="34"
+            width="75" height="666"><title>托尔斯泰或陀思妥耶夫斯基 HEEP 陀或托 恩妥夫斯基</title></rect>
+      
+      <rect data-id="180" x="613" y="420"
+            width="13" height="91"><title>不如注期天堂生性小事情</title></rect>
+      
+      <rect data-id="182" x="656" y="0"
+            width="23" height="501"><title>旷野 禅与摩托车维修艺术</title></rect>
+      
+      <rect data-id="183" x="765" y="367"
+            width="18" height="173"><title>张大春作品 小说稗类</title></rect>
+      
+      <rect data-id="185" x="808" y="430"
+            width="23" height="138"><title>大唐李白 张大春</title></rect>
+      
+      <rect data-id="187" x="851" y="434"
+            width="22" height="142"><title>叶秋 张大春著</title></rect>
+      
+      <rect data-id="188" x="890" y="399"
+            width="21" height="146"><title>聆听父亲 张大春</title></rect>
+      
+      <rect data-id="189" x="906" y="278"
+            width="237" height="28"><title>历史的照妖镜 烟雨萧十一面</title></rect>
+      
+      <rect data-id="190" x="929" y="395"
+            width="25" height="174"><title>战夏阳 张大春著</title></rect>
+      
+      <rect data-id="191" x="943" y="217"
+            width="162" height="54"><title>Letting a Noume Jouto 笔记大自然 一念桃花源</title></rect>
+      
+      <rect data-id="192" x="973" y="440"
+            width="21" height="196"><title>大唐李白 凤凰台 张大春</title></rect>
+      
+      <rect data-id="193" x="1016" y="337"
+            width="21" height="296"><title>大唐李白 将进酒 张大春</title></rect>
+      
+      <rect data-id="194" x="1052" y="334"
+            width="22" height="202"><title>文章自在 张大春</title></rect>
+      
+      <rect data-id="196" x="1087" y="331"
+            width="17" height="304"><title>印刻文學 認得幾個字 张大春 172 5</title></rect>
+      
+      <rect data-id="198" x="1120" y="356"
+            width="26" height="322"><title>羊道 李娟 前山夏牧场 送城出版社</title></rect>
+      
+      <rect data-id="200" x="1159" y="356"
+            width="23" height="194"><title>羊道 李娟 深山夏牧场</title></rect>
+      
+      <rect data-id="201" x="1198" y="363"
+            width="14" height="80"><title>阿勒泰的角落</title></rect>
+      
+      <rect data-id="202" x="1248" y="395"
+            width="21" height="132"><title>冬牧场 终</title></rect>
+      
+      <rect data-id="206" x="1299" y="479"
+            width="35" height="206"><title>全球化中的清朝 康熙的红票 孙生火 BE</title></rect>
+      
+      <rect data-id="207" x="1407" y="352"
+            width="21" height="68"><title>空谷幽兰</title></rect>
+      
+      <rect data-id="209" x="1453" y="359"
+            width="26" height="562"><title>江南之旅 月2 尖</title></rect>
+      
+      <rect data-id="210" x="1499" y="352"
+            width="21" height="67"><title>寻人不遇</title></rect>
+      
+      <rect data-id="212" x="1546" y="356"
+            width="22" height="323"><title>禅的行囊 FRANNE2</title></rect>
+      
+      <rect data-id="214" x="1638" y="349"
+            width="16" height="62"><title>传雷家书</title></rect>
+      
+      <rect data-id="215" x="1690" y="354"
+            width="21" height="131"><title>植物妻子</title></rect>
+      
+      <rect data-id="217" x="1740" y="315"
+            width="24" height="300"><title>兔子共和国 DOWN 果麦 WATERSHIP EX</title></rect>
+      
+      <rect data-id="218" x="1794" y="429"
+            width="24" height="84"><title>阅读的故事</title></rect>
+      
+      <rect data-id="219" x="1850" y="351"
+            width="40" height="236"><title>孤星之旅 ·苏东坡传 周文翰著</title></rect>
+      
+      <rect data-id="220" x="1908" y="376"
+            width="24" height="269"><title>斐多 柏拉图对话录 中国网际广场出公社</title></rect>
+      
+      <rect data-id="221" x="1930" y="358"
+            width="30" height="92"><title>用教学思建解决非数学问题 塑造数学脑</title></rect>
+      
+    </svg>
+    <div id="zoom" hidden><img src="4.jpg" alt=""></div>
+  </div>
+  </div>
+  <div class="spine-col">
+    <ul class="plain card" id="spines">
+      
+      <li id="spine-164" data-id="164">
+        <span class="text">通往威根码头之路 The Road to Wigan Pier 向加泰罗尼亚致敬</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a><a class="tag" href="../search.html?q=%E7%A4%BE%E4%BC%9A%E7%A7%91%E5%AD%A6">社会科学</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%80%9A%E5%BE%80%E5%A8%81%E6%A0%B9%E7%A0%81%E5%A4%B4%E4%B9%8B%E8%B7%AF+%E5%90%91%E5%8A%A0%E6%B3%B0%E7%BD%97%E5%B0%BC%E4%BA%9A%E8%87%B4%E6%95%AC&amp;cat=1001" data-query="通往威根码头之路 向加泰罗尼亚致敬" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-165" data-id="165">
+        <span class="text">焦循书院（人间词话）的哲学基础</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a><a class="tag" href="../search.html?q=%E8%AF%97%E8%AF%8D%E6%95%A3%E6%96%87">诗词散文</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%84%A6%E5%BE%AA%E4%B9%A6%E9%99%A2%E7%9A%84%E5%93%B2%E5%AD%A6%E5%9F%BA%E7%A1%80&amp;cat=1001" data-query="焦循书院的哲学基础" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-166" data-id="166">
+        <span class="text">OSUX 《古文观止》化读 HEES</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=OSUX+%E3%80%8A+%E5%8F%A4%E6%96%87%E8%A7%82%E6%AD%A2%E3%80%8B%E5%8C%96%E8%AF%BB&amp;cat=1001" data-query="OSUX 《 古文观止》化读" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-167" data-id="167">
+        <span class="text">文学种子 卡夫卡遗稿集 中国长城建造时 [奥] 果麦</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%96%87%E5%AD%A6%E7%A7%8D%E5%AD%90+%E5%8D%A1%E5%A4%AB%E5%8D%A1%E9%81%97%E7%A8%BF%E9%9B%86+%E4%B8%AD%E5%9B%BD%E9%95%BF%E5%9F%8E%E5%BB%BA%E9%80%A0%E6%97%B6+%E6%9E%9C%E9%BA%A6&amp;cat=1001" data-query="文学种子 卡夫卡遗稿集 中国长城建造时 果麦" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-168" data-id="168">
+        <span class="text">西伯利亚之夏 陀思妥耶夫斯基的</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E8%A5%BF%E4%BC%AF%E5%88%A9%E4%BA%9A%E4%B9%8B%E5%A4%8F+%E9%99%80%E6%80%9D%E5%A6%A5%E8%80%B6%E5%A4%AB%E6%96%AF%E5%9F%BA%E7%9A%84&amp;cat=1001" data-query="西伯利亚之夏 陀思妥耶夫斯基的" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-169" data-id="169">
+        <span class="text">历史的局外人 未方出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8E%86%E5%8F%B2%E7%9A%84%E5%B1%80%E5%A4%96%E4%BA%BA+%E6%9C%AA%E6%96%B9%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="历史的局外人 未方出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-170" data-id="170">
+        <span class="text">幸福之路</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a><a class="tag" href="../search.html?q=%E5%BF%83%E7%90%86%E5%AD%A6">心理学</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%B9%B8%E7%A6%8F%E4%B9%8B%E8%B7%AF&amp;cat=1001" data-query="幸福之路" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-172" data-id="172">
+        <span class="text">大家小书 鲁迅作品细读 鲁迅杂文集</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E8%AF%97%E8%AF%8D%E6%95%A3%E6%96%87">诗词散文</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%A4%A7%E5%AE%B6%E5%B0%8F%E4%B9%A6+%E9%B2%81%E8%BF%85%E4%BD%9C%E5%93%81%E7%BB%86%E8%AF%BB+%E9%B2%81%E8%BF%85%E6%9D%82%E6%96%87%E9%9B%86&amp;cat=1001" data-query="大家小书 鲁迅作品细读 鲁迅杂文集" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-175" data-id="175">
+        <span class="text">中国文化的性格 梁晓声</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E7%A4%BE%E4%BC%9A%E7%A7%91%E5%AD%A6">社会科学</a><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E4%B8%AD%E5%9B%BD%E6%96%87%E5%8C%96%E7%9A%84%E6%80%A7%E6%A0%BC+%E6%A2%81%E6%99%93%E5%A3%B0&amp;cat=1001" data-query="中国文化的性格 梁晓声" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-176" data-id="176">
+        <span class="text">乞力马扎罗的雪</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E4%B9%9E%E5%8A%9B%E9%A9%AC%E6%89%8E%E7%BD%97%E7%9A%84%E9%9B%AA&amp;cat=1001" data-query="乞力马扎罗的雪" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-178" data-id="178">
+        <span class="text">托尔斯泰或陀思妥耶夫斯基 HEEP 陀或托 恩妥夫斯基</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%89%98%E5%B0%94%E6%96%AF%E6%B3%B0%E6%88%96%E9%99%80%E6%80%9D%E5%A6%A5%E8%80%B6%E5%A4%AB%E6%96%AF%E5%9F%BA+%E9%99%80%E6%88%96%E6%89%98+%E6%81%A9%E5%A6%A5%E5%A4%AB%E6%96%AF%E5%9F%BA&amp;cat=1001" data-query="托尔斯泰或陀思妥耶夫斯基 陀或托 恩妥夫斯基" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-180" data-id="180">
+        <span class="text">不如注期天堂生性小事情</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%85%B6%E4%BB%96">其他</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E4%B8%8D%E5%A6%82%E6%B3%A8%E6%9C%9F%E5%A4%A9%E5%A0%82%E7%94%9F%E6%80%A7%E5%B0%8F%E4%BA%8B%E6%83%85&amp;cat=1001" data-query="不如注期天堂生性小事情" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-182" data-id="182">
+        <span class="text">旷野 禅与摩托车维修艺术</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%97%B7%E9%87%8E+%E7%A6%85%E4%B8%8E%E6%91%A9%E6%89%98%E8%BD%A6%E7%BB%B4%E4%BF%AE%E8%89%BA%E6%9C%AF&amp;cat=1001" data-query="旷野 禅与摩托车维修艺术" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-183" data-id="183">
+        <span class="text">张大春作品 小说稗类</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%BC%A0%E5%A4%A7%E6%98%A5%E4%BD%9C%E5%93%81+%E5%B0%8F%E8%AF%B4%E7%A8%97%E7%B1%BB&amp;cat=1001" data-query="张大春作品 小说稗类" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-185" data-id="185">
+        <span class="text">大唐李白 张大春</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%A4%A7%E5%94%90%E6%9D%8E%E7%99%BD+%E5%BC%A0%E5%A4%A7%E6%98%A5&amp;cat=1001" data-query="大唐李白 张大春" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-187" data-id="187">
+        <span class="text">叶秋 张大春著</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8F%B6%E7%A7%8B+%E5%BC%A0%E5%A4%A7%E6%98%A5&amp;cat=1001" data-query="叶秋 张大春" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-188" data-id="188">
+        <span class="text">聆听父亲 张大春</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E8%81%86%E5%90%AC%E7%88%B6%E4%BA%B2+%E5%BC%A0%E5%A4%A7%E6%98%A5&amp;cat=1001" data-query="聆听父亲 张大春" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-189" data-id="189">
+        <span class="text">历史的照妖镜 烟雨萧十一面</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8E%86%E5%8F%B2%E7%9A%84%E7%85%A7%E5%A6%96%E9%95%9C+%E7%83%9F%E9%9B%A8%E8%90%A7%E5%8D%81%E4%B8%80%E9%9D%A2&amp;cat=1001" data-query="历史的照妖镜 烟雨萧十一面" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-190" data-id="190">
+        <span class="text">战夏阳 张大春著</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%88%98%E5%A4%8F%E9%98%B3+%E5%BC%A0%E5%A4%A7%E6%98%A5&amp;cat=1001" data-query="战夏阳 张大春" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-191" data-id="191">
+        <span class="text">Letting a Noume Jouto 笔记大自然 一念桃花源</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=Letting+a+Noume+Jouto+%E7%AC%94%E8%AE%B0%E5%A4%A7%E8%87%AA%E7%84%B6+%E4%B8%80%E5%BF%B5%E6%A1%83%E8%8A%B1%E6%BA%90&amp;cat=1001" data-query="Letting a Noume Jouto 笔记大自然 一念桃花源" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-192" data-id="192">
+        <span class="text">大唐李白 凤凰台 张大春</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%A4%A7%E5%94%90%E6%9D%8E%E7%99%BD+%E5%87%A4%E5%87%B0%E5%8F%B0+%E5%BC%A0%E5%A4%A7%E6%98%A5&amp;cat=1001" data-query="大唐李白 凤凰台 张大春" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-193" data-id="193">
+        <span class="text">大唐李白 将进酒 张大春</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%A4%A7%E5%94%90%E6%9D%8E%E7%99%BD+%E5%B0%86%E8%BF%9B%E9%85%92+%E5%BC%A0%E5%A4%A7%E6%98%A5&amp;cat=1001" data-query="大唐李白 将进酒 张大春" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-194" data-id="194">
+        <span class="text">文章自在 张大春</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%96%87%E7%AB%A0%E8%87%AA%E5%9C%A8+%E5%BC%A0%E5%A4%A7%E6%98%A5&amp;cat=1001" data-query="文章自在 张大春" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-196" data-id="196">
+        <span class="text">印刻文學 認得幾個字 张大春 172 5</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8D%B0%E5%88%BB%E6%96%87%E5%AD%A6+%E8%AE%A4%E5%BE%97%E5%87%A0%E4%B8%AA%E5%AD%97+%E5%BC%A0%E5%A4%A7%E6%98%A5&amp;cat=1001" data-query="印刻文学 认得几个字 张大春" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-198" data-id="198">
+        <span class="text">羊道 李娟 前山夏牧场 送城出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%BE%8A%E9%81%93+%E6%9D%8E%E5%A8%9F+%E5%89%8D%E5%B1%B1%E5%A4%8F%E7%89%A7%E5%9C%BA+%E9%80%81%E5%9F%8E%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="羊道 李娟 前山夏牧场 送城出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-200" data-id="200">
+        <span class="text">羊道 李娟 深山夏牧场</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%BE%8A%E9%81%93+%E6%9D%8E%E5%A8%9F+%E6%B7%B1%E5%B1%B1%E5%A4%8F%E7%89%A7%E5%9C%BA&amp;cat=1001" data-query="羊道 李娟 深山夏牧场" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-201" data-id="201">
+        <span class="text">阿勒泰的角落</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%98%BF%E5%8B%92%E6%B3%B0%E7%9A%84%E8%A7%92%E8%90%BD&amp;cat=1001" data-query="阿勒泰的角落" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-202" data-id="202">
+        <span class="text">冬牧场 终</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%86%AC%E7%89%A7%E5%9C%BA+%E7%BB%88&amp;cat=1001" data-query="冬牧场 终" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-206" data-id="206">
+        <span class="text">全球化中的清朝 康熙的红票 孙生火 BE</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E4%B8%96%E7%95%8C%E5%8E%86%E5%8F%B2">世界历史</a><a class="tag" href="../search.html?q=%E7%A4%BE%E4%BC%9A%E7%A7%91%E5%AD%A6">社会科学</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%85%A8%E7%90%83%E5%8C%96%E4%B8%AD%E7%9A%84%E6%B8%85%E6%9C%9D+%E5%BA%B7%E7%86%99%E7%9A%84%E7%BA%A2%E7%A5%A8+%E5%AD%99%E7%94%9F%E7%81%AB&amp;cat=1001" data-query="全球化中的清朝 康熙的红票 孙生火" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-207" data-id="207">
+        <span class="text">空谷幽兰</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%A9%BA%E8%B0%B7%E5%B9%BD%E5%85%B0&amp;cat=1001" data-query="空谷幽兰" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-209" data-id="209">
+        <span class="text">江南之旅 月2 尖</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%B1%9F%E5%8D%97%E4%B9%8B%E6%97%85+%E5%B0%96&amp;cat=1001" data-query="江南之旅 尖" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-210" data-id="210">
+        <span class="text">寻人不遇</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%AF%BB%E4%BA%BA%E4%B8%8D%E9%81%87&amp;cat=1001" data-query="寻人不遇" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-212" data-id="212">
+        <span class="text">禅的行囊 FRANNE2</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%A6%85%E7%9A%84%E8%A1%8C%E5%9B%8A&amp;cat=1001" data-query="禅的行囊" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-214" data-id="214">
+        <span class="text">传雷家书</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E4%BC%A0%E9%9B%B7%E5%AE%B6%E4%B9%A6&amp;cat=1001" data-query="传雷家书" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-215" data-id="215">
+        <span class="text">植物妻子</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%A4%8D%E7%89%A9%E5%A6%BB%E5%AD%90&amp;cat=1001" data-query="植物妻子" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-217" data-id="217">
+        <span class="text">兔子共和国 DOWN 果麦 WATERSHIP EX</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%85%94%E5%AD%90%E5%85%B1%E5%92%8C%E5%9B%BD+%E6%9E%9C%E9%BA%A6&amp;cat=1001" data-query="兔子共和国 果麦" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-218" data-id="218">
+        <span class="text">阅读的故事</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%98%85%E8%AF%BB%E7%9A%84%E6%95%85%E4%BA%8B&amp;cat=1001" data-query="阅读的故事" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-219" data-id="219">
+        <span class="text">孤星之旅 ·苏东坡传 周文翰著</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%AD%A4%E6%98%9F%E4%B9%8B%E6%97%85+%E8%8B%8F%E4%B8%9C%E5%9D%A1%E4%BC%A0+%E5%91%A8%E6%96%87%E7%BF%B0&amp;cat=1001" data-query="孤星之旅 苏东坡传 周文翰" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-220" data-id="220">
+        <span class="text">斐多 柏拉图对话录 中国网际广场出公社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%96%90%E5%A4%9A+%E6%9F%8F%E6%8B%89%E5%9B%BE%E5%AF%B9%E8%AF%9D%E5%BD%95+%E4%B8%AD%E5%9B%BD%E7%BD%91%E9%99%85%E5%B9%BF%E5%9C%BA%E5%87%BA%E5%85%AC%E7%A4%BE&amp;cat=1001" data-query="斐多 柏拉图对话录 中国网际广场出公社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-221" data-id="221">
+        <span class="text">用教学思建解决非数学问题 塑造数学脑</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E6%95%B0%E5%AD%A6">数学</a><a class="tag" href="../search.html?q=%E6%95%B0%E5%AD%A6%E6%95%99%E8%82%B2">数学教育</a><a class="tag" href="../search.html?q=%E7%A7%91%E6%99%AE">科普</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%94%A8%E6%95%99%E5%AD%A6%E6%80%9D%E5%BB%BA%E8%A7%A3%E5%86%B3%E9%9D%9E%E6%95%B0%E5%AD%A6%E9%97%AE%E9%A2%98+%E5%A1%91%E9%80%A0%E6%95%B0%E5%AD%A6%E8%84%91&amp;cat=1001" data-query="用教学思建解决非数学问题 塑造数学脑" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+    </ul>
+    <p class="muted">共 40 本书，上传于 2026-10-03 07:27:58。</p>
+  </div>
+</div>
+
+<script>
+  // 量出布局距页面顶部的距离，供样式算出视口里剩余的高度；窗口大小变了重新量
+  const layout = document.getElementById("layout");
+  function measureLayoutTop() {
+    layout.style.setProperty("--layout-top", `${layout.getBoundingClientRect().top + window.scrollY}px`);
+  }
+  measureLayoutTop();
+  window.addEventListener("resize", measureLayoutTop);
+
+  const viewer = document.getElementById("viewer");
+  const photoImg = viewer.querySelector("img");
+  const NATURAL = { w: 2000, h: 922 };
+
+  // 点框或点列表项，两边同时高亮同一本书
+  function activate(id, scroll) {
+    document.querySelectorAll(".active").forEach((el) => el.classList.remove("active"));
+    document.querySelectorAll(`[data-id="${id}"]`).forEach((el) => el.classList.add("active"));
+    if (scroll) document.getElementById(`spine-${id}`).scrollIntoView({ block: "nearest" });
+  }
+  document.querySelectorAll("rect[data-id]").forEach((el) => el.addEventListener("click", () => activate(el.dataset.id, true)));
+  document.querySelectorAll("#spines li[data-id]").forEach((el) => el.addEventListener("click", (event) => {
+    if (event.target.closest(".tools, .douban, .tag")) return;
+    activate(el.dataset.id, false);
+  }));
+  const target = location.hash.match(/^#spine-(\d+)$/);
+  if (target) activate(target[1], true);
+
+  // 鼠标停在框上：把这条书脊放大到与整张图等高（竖排）或等宽（横排），居中盖在照片上；移开就消失
+  const zoom = document.getElementById("zoom");
+  const zoomImg = zoom.querySelector("img");
+  function showZoom(rect) {
+    const shown = { w: photoImg.clientWidth, h: photoImg.clientHeight };
+    const [bx, by, bw, bh] = ["x", "y", "width", "height"].map((k) => Number(rect.getAttribute(k)));
+    // 框在屏幕上的尺寸
+    const sw = bw / NATURAL.w * shown.w, sh = bh / NATURAL.h * shown.h;
+    // 竖排按高放大到整张图的高，横排按宽放大到整张图的宽；另一边不许超出图片
+    const scale = bh >= bw ? Math.min(shown.h / sh, shown.w / sw) : Math.min(shown.w / sw, shown.h / sh);
+    const cw = sw * scale, ch = sh * scale;
+    let frame = zoom.firstElementChild;
+    if (frame.tagName !== "DIV") {
+      frame = document.createElement("div");
+      frame.append(zoomImg);
+      zoom.prepend(frame);
+    }
+    frame.style.width = `${cw}px`;
+    frame.style.height = `${ch}px`;
+    frame.style.left = `${(shown.w - cw) / 2}px`;
+    frame.style.top = `${(shown.h - ch) / 2}px`;
+    zoomImg.style.width = `${shown.w * scale}px`;
+    zoomImg.style.height = `${shown.h * scale}px`;
+    zoomImg.style.left = `${-bx / NATURAL.w * shown.w * scale}px`;
+    zoomImg.style.top = `${-by / NATURAL.h * shown.h * scale}px`;
+    zoom.hidden = false;
+  }
+  function hideZoom() {
+    zoom.hidden = true;
+  }
+  document.querySelectorAll("rect[data-id]").forEach((el) => {
+    el.addEventListener("mouseenter", () => {
+      // 画框模式下不放大；只显示命中时，没命中的框是看不见的，也不放大
+      if (viewer.classList.contains("drawing")) return;
+      if (viewer.classList.contains("has-hits") && !el.classList.contains("hit")) return;
+      showZoom(el);
+    });
+    el.addEventListener("mouseleave", hideZoom);
+  });
+</script>
+
+</main>
+<script src="../data.js"></script>
+<script src="../site.js"></script>
+</body>
+</html>

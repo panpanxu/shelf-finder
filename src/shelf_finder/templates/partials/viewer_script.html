@@ -1,0 +1,67 @@
+<script>
+  // 量出布局距页面顶部的距离，供样式算出视口里剩余的高度；窗口大小变了重新量
+  const layout = document.getElementById("layout");
+  function measureLayoutTop() {
+    layout.style.setProperty("--layout-top", `${layout.getBoundingClientRect().top + window.scrollY}px`);
+  }
+  measureLayoutTop();
+  window.addEventListener("resize", measureLayoutTop);
+
+  const viewer = document.getElementById("viewer");
+  const photoImg = viewer.querySelector("img");
+  const NATURAL = { w: {{ photo.width }}, h: {{ photo.height }} };
+
+  // 点框或点列表项，两边同时高亮同一本书
+  function activate(id, scroll) {
+    document.querySelectorAll(".active").forEach((el) => el.classList.remove("active"));
+    document.querySelectorAll(`[data-id="${id}"]`).forEach((el) => el.classList.add("active"));
+    if (scroll) document.getElementById(`spine-${id}`).scrollIntoView({ block: "nearest" });
+  }
+  document.querySelectorAll("rect[data-id]").forEach((el) => el.addEventListener("click", () => activate(el.dataset.id, true)));
+  document.querySelectorAll("#spines li[data-id]").forEach((el) => el.addEventListener("click", (event) => {
+    if (event.target.closest(".tools, .douban, .tag")) return;
+    activate(el.dataset.id, false);
+  }));
+  const target = location.hash.match(/^#spine-(\d+)$/);
+  if (target) activate(target[1], true);
+
+  // 鼠标停在框上：把这条书脊放大到与整张图等高（竖排）或等宽（横排），居中盖在照片上；移开就消失
+  const zoom = document.getElementById("zoom");
+  const zoomImg = zoom.querySelector("img");
+  function showZoom(rect) {
+    const shown = { w: photoImg.clientWidth, h: photoImg.clientHeight };
+    const [bx, by, bw, bh] = ["x", "y", "width", "height"].map((k) => Number(rect.getAttribute(k)));
+    // 框在屏幕上的尺寸
+    const sw = bw / NATURAL.w * shown.w, sh = bh / NATURAL.h * shown.h;
+    // 竖排按高放大到整张图的高，横排按宽放大到整张图的宽；另一边不许超出图片
+    const scale = bh >= bw ? Math.min(shown.h / sh, shown.w / sw) : Math.min(shown.w / sw, shown.h / sh);
+    const cw = sw * scale, ch = sh * scale;
+    let frame = zoom.firstElementChild;
+    if (frame.tagName !== "DIV") {
+      frame = document.createElement("div");
+      frame.append(zoomImg);
+      zoom.prepend(frame);
+    }
+    frame.style.width = `${cw}px`;
+    frame.style.height = `${ch}px`;
+    frame.style.left = `${(shown.w - cw) / 2}px`;
+    frame.style.top = `${(shown.h - ch) / 2}px`;
+    zoomImg.style.width = `${shown.w * scale}px`;
+    zoomImg.style.height = `${shown.h * scale}px`;
+    zoomImg.style.left = `${-bx / NATURAL.w * shown.w * scale}px`;
+    zoomImg.style.top = `${-by / NATURAL.h * shown.h * scale}px`;
+    zoom.hidden = false;
+  }
+  function hideZoom() {
+    zoom.hidden = true;
+  }
+  document.querySelectorAll("rect[data-id]").forEach((el) => {
+    el.addEventListener("mouseenter", () => {
+      // 画框模式下不放大；只显示命中时，没命中的框是看不见的，也不放大
+      if (viewer.classList.contains("drawing")) return;
+      if (viewer.classList.contains("has-hits") && !el.classList.contains("hit")) return;
+      showZoom(el);
+    });
+    el.addEventListener("mouseleave", hideZoom);
+  });
+</script>

@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>客房第二层左 · 找书</title>
+<style>
+  :root {
+    --bg: #f6f3ee; --fg: #222; --muted: #777; --card: #fff; --line: #ddd6cc;
+    --accent: #c2410c; --accent-soft: rgba(194, 65, 12, 0.18); --hit-text: #d6006f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1a18; --fg: #eee; --muted: #999; --card: #262421; --line: #3a3733;
+      --accent: #fb923c; --accent-soft: rgba(251, 146, 60, 0.22); --hit-text: #ff5db1;
+    }
+  }
+  * { box-sizing: border-box; }
+  /* .row 这类 display: flex 的规则会盖过浏览器自带的 [hidden] 规则，这里把 hidden 属性重新立起来 */
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  a { color: var(--accent); text-decoration: none; }
+  h1 { font-size: 1.4rem; margin: 0 0 12px; }
+  h2 { font-size: 1.1rem; margin: 24px 0 8px; }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  form.inline { display: inline; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input[type=text], input[type=search] { flex: 1; min-width: 0; padding: 8px 10px; font-size: 1rem;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
+  button { padding: 8px 14px; font-size: 1rem; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--card); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  ul.plain { list-style: none; padding: 0; margin: 0; }
+  ul.plain li { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  nav { margin-bottom: 12px; }
+  /* 类型标签：小圆角底色块 */
+  .tag { display: inline-block; font-size: 0.78rem; font-weight: normal; line-height: 1.4; padding: 0 6px;
+    margin-left: 4px; border-radius: 999px; background: var(--accent-soft); color: var(--fg); white-space: nowrap; }
+  .tag-cloud { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+  .tag-cloud .tag { font-size: 0.95rem; padding: 2px 10px; margin: 0; }
+  .tag small { color: var(--muted); }
+  /* 豆瓣绿，和命中的洋红色区分开 */
+  a.douban { white-space: nowrap; font-size: 0.85rem; font-weight: normal; color: #2e963d; margin-left: 6px; }
+</style>
+</head>
+<body data-page="photo" data-root="../">
+<main>
+  <nav><a href="../index.html" id="nav-back">← 全部照片</a></nav>
+  
+<style>
+  /* 图片和覆盖层叠在同一个网格单元里，覆盖层的尺寸永远等于图片实际显示的尺寸 */
+  .viewer { display: grid; line-height: 0; max-width: 100%; }
+  .viewer > * { grid-area: 1 / 1; }
+  .viewer img { display: block; max-width: 100%; width: auto; height: auto; border-radius: 6px; }
+  .viewer svg { width: 100%; height: 100%; }
+  /* 放大镜：和图片叠在同一个网格单元里，自己定位；不接鼠标事件，免得遮住触发它的框 */
+  #zoom { position: relative; pointer-events: none; z-index: 1; justify-self: start; align-self: start; }
+  #zoom > div { position: absolute; overflow: hidden; border: 2px solid #fff; border-radius: 4px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5); background: #000; }
+  /* 放大用的图不受 .viewer img 的最大宽高限制，否则被压回原尺寸后只剩黑框 */
+  #zoom img { position: absolute; display: block; max-width: none; max-height: none; border-radius: 0; }
+  /* 框画在照片上，颜色不随明暗主题变：亮绿配黑色描边投影，在木色书架和深色书脊上都显眼 */
+  .viewer rect { fill: transparent; stroke: #39ff14; stroke-width: 3; vector-effect: non-scaling-stroke; cursor: pointer;
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer.has-hits rect { stroke: none; filter: none; }
+  .viewer rect.hit { stroke: #ff2d95; stroke-width: 4; fill: rgba(255, 45, 149, 0.28);
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer rect.active, .viewer.has-hits rect.active { stroke: #ff2d95; stroke-width: 6; fill: rgba(255, 45, 149, 0.4);
+    filter: drop-shadow(0 0 2px #000) drop-shadow(0 0 2px #000); }
+  /* 桌面宽度：整块布局占满视口剩余高度，图片在左栏居中、不随页面滚动，右栏列表在自己的范围里滚动。
+     --layout-top 是布局距离页面顶部的距离，由脚本量出来。 */
+  .layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+  .viewer-col { display: flex; align-items: center; justify-content: center; min-height: 0; }
+  @media (min-width: 761px) {
+    .layout { --available: calc(100dvh - var(--layout-top, 0px) - 16px); height: var(--available); }
+    .viewer-col { height: 100%; }
+    .viewer img { max-height: var(--available); }
+    .spine-col { height: 100%; overflow-y: auto; min-height: 0; }
+  }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+  /* 每本书两行：第一行书名和文字，第二行标签、豆瓣链接（和操作按钮） */
+  #spines li { cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+  #spines li .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-weight: normal; color: var(--fg); }
+  #spines li .meta .tags { display: flex; gap: 4px; flex-wrap: wrap; }
+  #spines li .meta .tag { margin-left: 0; }
+  #spines li.hit { font-weight: 600; color: var(--hit-text); border-left: 4px solid var(--hit-text); }
+  #spines li.active { background: var(--accent-soft); }
+</style>
+
+<h1>客房第二层左</h1>
+<form class="row card" action="14.html" method="get">
+  <input type="search" name="q" placeholder="在这张照片里找">
+  <button class="primary">找</button>
+</form>
+<p class="muted" id="hit-note" hidden></p>
+
+<div class="layout" style="margin-top: 12px" id="layout" data-photo="14">
+  <div class="viewer-col">
+  <div class="viewer" id="viewer">
+    <img src="14.jpg" alt="客房第二层左">
+    <svg id="overlay" viewBox="0 0 2000 922" preserveAspectRatio="none">
+      
+      <rect data-id="506" x="436" y="120"
+            width="119" height="759"><title>中华经典名著全本全注全译丛书 大慈恩寺三藏法师传 中华书局</title></rect>
+      
+      <rect data-id="507" x="601" y="182"
+            width="56" height="668"><title>中华经典名著全本全注全译丛书 酉阳杂俎（上） 中华书局</title></rect>
+      
+      <rect data-id="508" x="728" y="183"
+            width="53" height="674"><title>中华经典名著全本全注全译丛书 酉阳杂俎（下） 中华书局</title></rect>
+      
+      <rect data-id="509" x="831" y="102"
+            width="94" height="748"><title>史记 列传（一） 中华书局</title></rect>
+      
+      <rect data-id="510" x="949" y="101"
+            width="95" height="215"><title>史记</title></rect>
+      
+      <rect data-id="511" x="1056" y="105"
+            width="94" height="365"><title>史记 世家（一）</title></rect>
+      
+      <rect data-id="512" x="1172" y="102"
+            width="97" height="391"><title>史记 世家（二）</title></rect>
+      
+      <rect data-id="513" x="1285" y="105"
+            width="94" height="391"><title>史记 列传（四）</title></rect>
+      
+      <rect data-id="514" x="1416" y="108"
+            width="99" height="213"><title>史记</title></rect>
+      
+      <rect data-id="517" x="1557" y="115"
+            width="74" height="218"><title>史记</title></rect>
+      
+      <rect data-id="518" x="1649" y="114"
+            width="89" height="229"><title>史记</title></rect>
+      
+      <rect data-id="516" x="1741" y="108"
+            width="102" height="216"><title>史记</title></rect>
+      
+    </svg>
+    <div id="zoom" hidden><img src="14.jpg" alt=""></div>
+  </div>
+  </div>
+  <div class="spine-col">
+    <ul class="plain card" id="spines">
+      
+      <li id="spine-506" data-id="506">
+        <span class="text">中华经典名著全本全注全译丛书 大慈恩寺三藏法师传 中华书局</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E4%B8%AD%E5%8D%8E%E7%BB%8F%E5%85%B8%E5%90%8D%E8%91%97%E5%85%A8%E6%9C%AC%E5%85%A8%E6%B3%A8%E5%85%A8%E8%AF%91%E4%B8%9B%E4%B9%A6+%E5%A4%A7%E6%85%88%E6%81%A9%E5%AF%BA%E4%B8%89%E8%97%8F%E6%B3%95%E5%B8%88%E4%BC%A0+%E4%B8%AD%E5%8D%8E%E4%B9%A6%E5%B1%80&amp;cat=1001" data-query="中华经典名著全本全注全译丛书 大慈恩寺三藏法师传 中华书局" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-507" data-id="507">
+        <span class="text">中华经典名著全本全注全译丛书 酉阳杂俎（上） 中华书局</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E4%B8%AD%E5%8D%8E%E7%BB%8F%E5%85%B8%E5%90%8D%E8%91%97%E5%85%A8%E6%9C%AC%E5%85%A8%E6%B3%A8%E5%85%A8%E8%AF%91%E4%B8%9B%E4%B9%A6+%E9%85%89%E9%98%B3%E6%9D%82%E4%BF%8E+%E4%B8%AD%E5%8D%8E%E4%B9%A6%E5%B1%80&amp;cat=1001" data-query="中华经典名著全本全注全译丛书 酉阳杂俎 中华书局" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-508" data-id="508">
+        <span class="text">中华经典名著全本全注全译丛书 酉阳杂俎（下） 中华书局</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E4%B8%AD%E5%8D%8E%E7%BB%8F%E5%85%B8%E5%90%8D%E8%91%97%E5%85%A8%E6%9C%AC%E5%85%A8%E6%B3%A8%E5%85%A8%E8%AF%91%E4%B8%9B%E4%B9%A6+%E9%85%89%E9%98%B3%E6%9D%82%E4%BF%8E+%E4%B8%AD%E5%8D%8E%E4%B9%A6%E5%B1%80&amp;cat=1001" data-query="中华经典名著全本全注全译丛书 酉阳杂俎 中华书局" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-509" data-id="509">
+        <span class="text">史记 列传（一） 中华书局</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8F%B2%E8%AE%B0+%E5%88%97%E4%BC%A0+%E4%B8%AD%E5%8D%8E%E4%B9%A6%E5%B1%80&amp;cat=1001" data-query="史记 列传 中华书局" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-510" data-id="510">
+        <span class="text">史记</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8F%B2%E8%AE%B0&amp;cat=1001" data-query="史记" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-511" data-id="511">
+        <span class="text">史记 世家（一）</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8F%B2%E8%AE%B0+%E4%B8%96%E5%AE%B6&amp;cat=1001" data-query="史记 世家" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-512" data-id="512">
+        <span class="text">史记 世家（二）</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8F%B2%E8%AE%B0+%E4%B8%96%E5%AE%B6&amp;cat=1001" data-query="史记 世家" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-513" data-id="513">
+        <span class="text">史记 列传（四）</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8F%B2%E8%AE%B0+%E5%88%97%E4%BC%A0&amp;cat=1001" data-query="史记 列传" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-514" data-id="514">
+        <span class="text">史记</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8F%B2%E8%AE%B0&amp;cat=1001" data-query="史记" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-517" data-id="517">
+        <span class="text">史记</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8F%B2%E8%AE%B0&amp;cat=1001" data-query="史记" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-518" data-id="518">
+        <span class="text">史记</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8F%B2%E8%AE%B0&amp;cat=1001" data-query="史记" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-516" data-id="516">
+        <span class="text">史记</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8F%B2%E8%AE%B0&amp;cat=1001" data-query="史记" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+    </ul>
+    <p class="muted">共 12 本书，上传于 2026-10-03 09:59:09。</p>
+  </div>
+</div>
+
+<script>
+  // 量出布局距页面顶部的距离，供样式算出视口里剩余的高度；窗口大小变了重新量
+  const layout = document.getElementById("layout");
+  function measureLayoutTop() {
+    layout.style.setProperty("--layout-top", `${layout.getBoundingClientRect().top + window.scrollY}px`);
+  }
+  measureLayoutTop();
+  window.addEventListener("resize", measureLayoutTop);
+
+  const viewer = document.getElementById("viewer");
+  const photoImg = viewer.querySelector("img");
+  const NATURAL = { w: 2000, h: 922 };
+
+  // 点框或点列表项，两边同时高亮同一本书
+  function activate(id, scroll) {
+    document.querySelectorAll(".active").forEach((el) => el.classList.remove("active"));
+    document.querySelectorAll(`[data-id="${id}"]`).forEach((el) => el.classList.add("active"));
+    if (scroll) document.getElementById(`spine-${id}`).scrollIntoView({ block: "nearest" });
+  }
+  document.querySelectorAll("rect[data-id]").forEach((el) => el.addEventListener("click", () => activate(el.dataset.id, true)));
+  document.querySelectorAll("#spines li[data-id]").forEach((el) => el.addEventListener("click", (event) => {
+    if (event.target.closest(".tools, .douban, .tag")) return;
+    activate(el.dataset.id, false);
+  }));
+  const target = location.hash.match(/^#spine-(\d+)$/);
+  if (target) activate(target[1], true);
+
+  // 鼠标停在框上：把这条书脊放大到与整张图等高（竖排）或等宽（横排），居中盖在照片上；移开就消失
+  const zoom = document.getElementById("zoom");
+  const zoomImg = zoom.querySelector("img");
+  function showZoom(rect) {
+    const shown = { w: photoImg.clientWidth, h: photoImg.clientHeight };
+    const [bx, by, bw, bh] = ["x", "y", "width", "height"].map((k) => Number(rect.getAttribute(k)));
+    // 框在屏幕上的尺寸
+    const sw = bw / NATURAL.w * shown.w, sh = bh / NATURAL.h * shown.h;
+    // 竖排按高放大到整张图的高，横排按宽放大到整张图的宽；另一边不许超出图片
+    const scale = bh >= bw ? Math.min(shown.h / sh, shown.w / sw) : Math.min(shown.w / sw, shown.h / sh);
+    const cw = sw * scale, ch = sh * scale;
+    let frame = zoom.firstElementChild;
+    if (frame.tagName !== "DIV") {
+      frame = document.createElement("div");
+      frame.append(zoomImg);
+      zoom.prepend(frame);
+    }
+    frame.style.width = `${cw}px`;
+    frame.style.height = `${ch}px`;
+    frame.style.left = `${(shown.w - cw) / 2}px`;
+    frame.style.top = `${(shown.h - ch) / 2}px`;
+    zoomImg.style.width = `${shown.w * scale}px`;
+    zoomImg.style.height = `${shown.h * scale}px`;
+    zoomImg.style.left = `${-bx / NATURAL.w * shown.w * scale}px`;
+    zoomImg.style.top = `${-by / NATURAL.h * shown.h * scale}px`;
+    zoom.hidden = false;
+  }
+  function hideZoom() {
+    zoom.hidden = true;
+  }
+  document.querySelectorAll("rect[data-id]").forEach((el) => {
+    el.addEventListener("mouseenter", () => {
+      // 画框模式下不放大；只显示命中时，没命中的框是看不见的，也不放大
+      if (viewer.classList.contains("drawing")) return;
+      if (viewer.classList.contains("has-hits") && !el.classList.contains("hit")) return;
+      showZoom(el);
+    });
+    el.addEventListener("mouseleave", hideZoom);
+  });
+</script>
+
+</main>
+<script src="../data.js"></script>
+<script src="../site.js"></script>
+</body>
+</html>

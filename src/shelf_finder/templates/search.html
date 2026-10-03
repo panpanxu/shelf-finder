@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ q }} · 找书{% endblock %}
+{% block content %}
+<form class="row card" action="/search" method="get">
+  <input type="search" name="q" value="{{ q }}" required>
+  <button class="primary">搜索</button>
+</form>
+
+{% if groups %}
+{% for photo, hits in groups %}
+<h2><a href="/photos/{{ photo.id }}?q={{ q | urlencode }}">{{ photo.name }}</a></h2>
+<ul class="plain card">
+  {% for hit in hits %}
+  <li><a href="/photos/{{ photo.id }}?q={{ q | urlencode }}#spine-{{ hit.spine_id }}">{{ hit.spine.text }}</a>
+    {% for tag in hit.spine.tags %}<a class="tag" href="/search?q={{ tag | urlencode }}">{{ tag }}</a>{% endfor %}
+    <a class="douban" href="{{ douban[hit.spine_id] }}" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a></li>
+  {% endfor %}
+</ul>
+{% endfor %}
+{% else %}
+<p class="muted">没有找到包含「{{ q }}」的书。</p>
+{% endif %}
+{% endblock %}

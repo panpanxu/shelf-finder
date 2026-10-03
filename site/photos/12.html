@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>客房第一层左 · 找书</title>
+<style>
+  :root {
+    --bg: #f6f3ee; --fg: #222; --muted: #777; --card: #fff; --line: #ddd6cc;
+    --accent: #c2410c; --accent-soft: rgba(194, 65, 12, 0.18); --hit-text: #d6006f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1a18; --fg: #eee; --muted: #999; --card: #262421; --line: #3a3733;
+      --accent: #fb923c; --accent-soft: rgba(251, 146, 60, 0.22); --hit-text: #ff5db1;
+    }
+  }
+  * { box-sizing: border-box; }
+  /* .row 这类 display: flex 的规则会盖过浏览器自带的 [hidden] 规则，这里把 hidden 属性重新立起来 */
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  a { color: var(--accent); text-decoration: none; }
+  h1 { font-size: 1.4rem; margin: 0 0 12px; }
+  h2 { font-size: 1.1rem; margin: 24px 0 8px; }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  form.inline { display: inline; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input[type=text], input[type=search] { flex: 1; min-width: 0; padding: 8px 10px; font-size: 1rem;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
+  button { padding: 8px 14px; font-size: 1rem; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--card); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  ul.plain { list-style: none; padding: 0; margin: 0; }
+  ul.plain li { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  nav { margin-bottom: 12px; }
+  /* 类型标签：小圆角底色块 */
+  .tag { display: inline-block; font-size: 0.78rem; font-weight: normal; line-height: 1.4; padding: 0 6px;
+    margin-left: 4px; border-radius: 999px; background: var(--accent-soft); color: var(--fg); white-space: nowrap; }
+  .tag-cloud { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+  .tag-cloud .tag { font-size: 0.95rem; padding: 2px 10px; margin: 0; }
+  .tag small { color: var(--muted); }
+  /* 豆瓣绿，和命中的洋红色区分开 */
+  a.douban { white-space: nowrap; font-size: 0.85rem; font-weight: normal; color: #2e963d; margin-left: 6px; }
+</style>
+</head>
+<body data-page="photo" data-root="../">
+<main>
+  <nav><a href="../index.html" id="nav-back">← 全部照片</a></nav>
+  
+<style>
+  /* 图片和覆盖层叠在同一个网格单元里，覆盖层的尺寸永远等于图片实际显示的尺寸 */
+  .viewer { display: grid; line-height: 0; max-width: 100%; }
+  .viewer > * { grid-area: 1 / 1; }
+  .viewer img { display: block; max-width: 100%; width: auto; height: auto; border-radius: 6px; }
+  .viewer svg { width: 100%; height: 100%; }
+  /* 放大镜：和图片叠在同一个网格单元里，自己定位；不接鼠标事件，免得遮住触发它的框 */
+  #zoom { position: relative; pointer-events: none; z-index: 1; justify-self: start; align-self: start; }
+  #zoom > div { position: absolute; overflow: hidden; border: 2px solid #fff; border-radius: 4px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5); background: #000; }
+  /* 放大用的图不受 .viewer img 的最大宽高限制，否则被压回原尺寸后只剩黑框 */
+  #zoom img { position: absolute; display: block; max-width: none; max-height: none; border-radius: 0; }
+  /* 框画在照片上，颜色不随明暗主题变：亮绿配黑色描边投影，在木色书架和深色书脊上都显眼 */
+  .viewer rect { fill: transparent; stroke: #39ff14; stroke-width: 3; vector-effect: non-scaling-stroke; cursor: pointer;
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer.has-hits rect { stroke: none; filter: none; }
+  .viewer rect.hit { stroke: #ff2d95; stroke-width: 4; fill: rgba(255, 45, 149, 0.28);
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer rect.active, .viewer.has-hits rect.active { stroke: #ff2d95; stroke-width: 6; fill: rgba(255, 45, 149, 0.4);
+    filter: drop-shadow(0 0 2px #000) drop-shadow(0 0 2px #000); }
+  /* 桌面宽度：整块布局占满视口剩余高度，图片在左栏居中、不随页面滚动，右栏列表在自己的范围里滚动。
+     --layout-top 是布局距离页面顶部的距离，由脚本量出来。 */
+  .layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+  .viewer-col { display: flex; align-items: center; justify-content: center; min-height: 0; }
+  @media (min-width: 761px) {
+    .layout { --available: calc(100dvh - var(--layout-top, 0px) - 16px); height: var(--available); }
+    .viewer-col { height: 100%; }
+    .viewer img { max-height: var(--available); }
+    .spine-col { height: 100%; overflow-y: auto; min-height: 0; }
+  }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+  /* 每本书两行：第一行书名和文字，第二行标签、豆瓣链接（和操作按钮） */
+  #spines li { cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+  #spines li .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-weight: normal; color: var(--fg); }
+  #spines li .meta .tags { display: flex; gap: 4px; flex-wrap: wrap; }
+  #spines li .meta .tag { margin-left: 0; }
+  #spines li.hit { font-weight: 600; color: var(--hit-text); border-left: 4px solid var(--hit-text); }
+  #spines li.active { background: var(--accent-soft); }
+</style>
+
+<h1>客房第一层左</h1>
+<form class="row card" action="12.html" method="get">
+  <input type="search" name="q" placeholder="在这张照片里找">
+  <button class="primary">找</button>
+</form>
+<p class="muted" id="hit-note" hidden></p>
+
+<div class="layout" style="margin-top: 12px" id="layout" data-photo="12">
+  <div class="viewer-col">
+  <div class="viewer" id="viewer">
+    <img src="12.jpg" alt="客房第一层左">
+    <svg id="overlay" viewBox="0 0 1068 492" preserveAspectRatio="none">
+      
+      <rect data-id="434" x="45" y="55"
+            width="184" height="345"><title>战争与和平 列夫·尼古拉耶维奇·托尔斯泰</title></rect>
+      
+      <rect data-id="436" x="191" y="69"
+            width="34" height="278"><title>恶心 让-保罗·萨特</title></rect>
+      
+      <rect data-id="437" x="244" y="201"
+            width="15" height="233"><title>偷书贼</title></rect>
+      
+      <rect data-id="438" x="286" y="150"
+            width="14" height="94"><title>消失的地平线</title></rect>
+      
+      <rect data-id="440" x="319" y="120"
+            width="11" height="284"><title>最后一片叶子</title></rect>
+      
+      <rect data-id="441" x="345" y="109"
+            width="24" height="93"><title>海上孤独家</title></rect>
+      
+      <rect data-id="444" x="385" y="207"
+            width="19" height="98"><title>蝇王 William Golding</title></rect>
+      
+      <rect data-id="445" x="419" y="172"
+            width="22" height="172"><title>罗生门</title></rect>
+      
+      <rect data-id="447" x="481" y="239"
+            width="17" height="47"><title>匡超人 駱以軍</title></rect>
+      
+      <rect data-id="448" x="520" y="152"
+            width="16" height="96"><title>听听那冷雨 余光中</title></rect>
+      
+      <rect data-id="449" x="546" y="133"
+            width="28" height="176"><title>我的左脚</title></rect>
+      
+      <rect data-id="450" x="605" y="135"
+            width="289" height="213"><title>白色绵羊里的黑色绵羊</title></rect>
+      
+      <rect data-id="451" x="636" y="151"
+            width="19" height="99"><title>古都</title></rect>
+      
+      <rect data-id="452" x="674" y="118"
+            width="19" height="160"><title>撒哈拉的故事 三毛</title></rect>
+      
+      <rect data-id="453" x="714" y="206"
+            width="29" height="59"><title>小城</title></rect>
+      
+      <rect data-id="454" x="767" y="159"
+            width="14" height="197"><title>双城记 狄更斯</title></rect>
+      
+      <rect data-id="455" x="802" y="168"
+            width="20" height="116"><title>麦田里的守望者</title></rect>
+      
+      <rect data-id="456" x="841" y="203"
+            width="22" height="107"><title>不是东西</title></rect>
+      
+      <rect data-id="457" x="880" y="183"
+            width="14" height="89"><title>天下英雄谁敌手</title></rect>
+      
+      <rect data-id="458" x="950" y="225"
+            width="11" height="207"><title>远山淡影</title></rect>
+      
+      <rect data-id="459" x="990" y="159"
+            width="18" height="82"><title>好一座浮岛 简媜</title></rect>
+      
+      <rect data-id="460" x="1027" y="151"
+            width="24" height="233"><title>追风筝的人</title></rect>
+      
+    </svg>
+    <div id="zoom" hidden><img src="12.jpg" alt=""></div>
+  </div>
+  </div>
+  <div class="spine-col">
+    <ul class="plain card" id="spines">
+      
+      <li id="spine-434" data-id="434">
+        <span class="text">战争与和平 列夫·尼古拉耶维奇·托尔斯泰</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E4%B8%96%E7%95%8C%E5%8E%86%E5%8F%B2">世界历史</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%88%98%E4%BA%89%E4%B8%8E%E5%92%8C%E5%B9%B3+%E5%88%97%E5%A4%AB%C2%B7%E5%B0%BC%E5%8F%A4%E6%8B%89%E8%80%B6%E7%BB%B4%E5%A5%87%C2%B7%E6%89%98%E5%B0%94%E6%96%AF%E6%B3%B0&amp;cat=1001" data-query="战争与和平 列夫·尼古拉耶维奇·托尔斯泰" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-436" data-id="436">
+        <span class="text">恶心 让-保罗·萨特</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%81%B6%E5%BF%83+%E8%AE%A9-%E4%BF%9D%E7%BD%97%C2%B7%E8%90%A8%E7%89%B9&amp;cat=1001" data-query="恶心 让-保罗·萨特" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-437" data-id="437">
+        <span class="text">偷书贼</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E4%B8%96%E7%95%8C%E5%8E%86%E5%8F%B2">世界历史</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%81%B7%E4%B9%A6%E8%B4%BC&amp;cat=1001" data-query="偷书贼" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-438" data-id="438">
+        <span class="text">消失的地平线</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%B6%88%E5%A4%B1%E7%9A%84%E5%9C%B0%E5%B9%B3%E7%BA%BF&amp;cat=1001" data-query="消失的地平线" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-440" data-id="440">
+        <span class="text">最后一片叶子</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%9C%80%E5%90%8E%E4%B8%80%E7%89%87%E5%8F%B6%E5%AD%90&amp;cat=1001" data-query="最后一片叶子" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-441" data-id="441">
+        <span class="text">海上孤独家</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%B5%B7%E4%B8%8A%E5%AD%A4%E7%8B%AC%E5%AE%B6&amp;cat=1001" data-query="海上孤独家" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-444" data-id="444">
+        <span class="text">蝇王 William Golding</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E8%9D%87%E7%8E%8B&amp;cat=1001" data-query="蝇王" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-445" data-id="445">
+        <span class="text">罗生门</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%BD%97%E7%94%9F%E9%97%A8&amp;cat=1001" data-query="罗生门" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-447" data-id="447">
+        <span class="text">匡超人 駱以軍</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8C%A1%E8%B6%85%E4%BA%BA+%E9%AA%86%E4%BB%A5%E5%86%9B&amp;cat=1001" data-query="匡超人 骆以军" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-448" data-id="448">
+        <span class="text">听听那冷雨 余光中</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%AF%97%E8%AF%8D%E6%95%A3%E6%96%87">诗词散文</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%90%AC%E5%90%AC%E9%82%A3%E5%86%B7%E9%9B%A8+%E4%BD%99%E5%85%89%E4%B8%AD&amp;cat=1001" data-query="听听那冷雨 余光中" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-449" data-id="449">
+        <span class="text">我的左脚</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%88%91%E7%9A%84%E5%B7%A6%E8%84%9A&amp;cat=1001" data-query="我的左脚" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-450" data-id="450">
+        <span class="text">白色绵羊里的黑色绵羊</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%99%BD%E8%89%B2%E7%BB%B5%E7%BE%8A%E9%87%8C%E7%9A%84%E9%BB%91%E8%89%B2%E7%BB%B5%E7%BE%8A&amp;cat=1001" data-query="白色绵羊里的黑色绵羊" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-451" data-id="451">
+        <span class="text">古都</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8F%A4%E9%83%BD&amp;cat=1001" data-query="古都" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-452" data-id="452">
+        <span class="text">撒哈拉的故事 三毛</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%AF%97%E8%AF%8D%E6%95%A3%E6%96%87">诗词散文</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%92%92%E5%93%88%E6%8B%89%E7%9A%84%E6%95%85%E4%BA%8B+%E4%B8%89%E6%AF%9B&amp;cat=1001" data-query="撒哈拉的故事 三毛" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-453" data-id="453">
+        <span class="text">小城</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%B0%8F%E5%9F%8E&amp;cat=1001" data-query="小城" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-454" data-id="454">
+        <span class="text">双城记 狄更斯</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E4%B8%96%E7%95%8C%E5%8E%86%E5%8F%B2">世界历史</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8F%8C%E5%9F%8E%E8%AE%B0+%E7%8B%84%E6%9B%B4%E6%96%AF&amp;cat=1001" data-query="双城记 狄更斯" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-455" data-id="455">
+        <span class="text">麦田里的守望者</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%BA%A6%E7%94%B0%E9%87%8C%E7%9A%84%E5%AE%88%E6%9C%9B%E8%80%85&amp;cat=1001" data-query="麦田里的守望者" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-456" data-id="456">
+        <span class="text">不是东西</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E4%B8%8D%E6%98%AF%E4%B8%9C%E8%A5%BF&amp;cat=1001" data-query="不是东西" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-457" data-id="457">
+        <span class="text">天下英雄谁敌手</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%A4%A9%E4%B8%8B%E8%8B%B1%E9%9B%84%E8%B0%81%E6%95%8C%E6%89%8B&amp;cat=1001" data-query="天下英雄谁敌手" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-458" data-id="458">
+        <span class="text">远山淡影</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E8%BF%9C%E5%B1%B1%E6%B7%A1%E5%BD%B1&amp;cat=1001" data-query="远山淡影" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-459" data-id="459">
+        <span class="text">好一座浮岛 简媜</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%AF%97%E8%AF%8D%E6%95%A3%E6%96%87">诗词散文</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%A5%BD%E4%B8%80%E5%BA%A7%E6%B5%AE%E5%B2%9B+%E7%AE%80%E5%AA%9C&amp;cat=1001" data-query="好一座浮岛 简媜" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-460" data-id="460">
+        <span class="text">追风筝的人</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E8%BF%BD%E9%A3%8E%E7%AD%9D%E7%9A%84%E4%BA%BA&amp;cat=1001" data-query="追风筝的人" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+    </ul>
+    <p class="muted">共 22 本书，上传于 2026-10-03 09:13:35。</p>
+  </div>
+</div>
+
+<script>
+  // 量出布局距页面顶部的距离，供样式算出视口里剩余的高度；窗口大小变了重新量
+  const layout = document.getElementById("layout");
+  function measureLayoutTop() {
+    layout.style.setProperty("--layout-top", `${layout.getBoundingClientRect().top + window.scrollY}px`);
+  }
+  measureLayoutTop();
+  window.addEventListener("resize", measureLayoutTop);
+
+  const viewer = document.getElementById("viewer");
+  const photoImg = viewer.querySelector("img");
+  const NATURAL = { w: 1068, h: 492 };
+
+  // 点框或点列表项，两边同时高亮同一本书
+  function activate(id, scroll) {
+    document.querySelectorAll(".active").forEach((el) => el.classList.remove("active"));
+    document.querySelectorAll(`[data-id="${id}"]`).forEach((el) => el.classList.add("active"));
+    if (scroll) document.getElementById(`spine-${id}`).scrollIntoView({ block: "nearest" });
+  }
+  document.querySelectorAll("rect[data-id]").forEach((el) => el.addEventListener("click", () => activate(el.dataset.id, true)));
+  document.querySelectorAll("#spines li[data-id]").forEach((el) => el.addEventListener("click", (event) => {
+    if (event.target.closest(".tools, .douban, .tag")) return;
+    activate(el.dataset.id, false);
+  }));
+  const target = location.hash.match(/^#spine-(\d+)$/);
+  if (target) activate(target[1], true);
+
+  // 鼠标停在框上：把这条书脊放大到与整张图等高（竖排）或等宽（横排），居中盖在照片上；移开就消失
+  const zoom = document.getElementById("zoom");
+  const zoomImg = zoom.querySelector("img");
+  function showZoom(rect) {
+    const shown = { w: photoImg.clientWidth, h: photoImg.clientHeight };
+    const [bx, by, bw, bh] = ["x", "y", "width", "height"].map((k) => Number(rect.getAttribute(k)));
+    // 框在屏幕上的尺寸
+    const sw = bw / NATURAL.w * shown.w, sh = bh / NATURAL.h * shown.h;
+    // 竖排按高放大到整张图的高，横排按宽放大到整张图的宽；另一边不许超出图片
+    const scale = bh >= bw ? Math.min(shown.h / sh, shown.w / sw) : Math.min(shown.w / sw, shown.h / sh);
+    const cw = sw * scale, ch = sh * scale;
+    let frame = zoom.firstElementChild;
+    if (frame.tagName !== "DIV") {
+      frame = document.createElement("div");
+      frame.append(zoomImg);
+      zoom.prepend(frame);
+    }
+    frame.style.width = `${cw}px`;
+    frame.style.height = `${ch}px`;
+    frame.style.left = `${(shown.w - cw) / 2}px`;
+    frame.style.top = `${(shown.h - ch) / 2}px`;
+    zoomImg.style.width = `${shown.w * scale}px`;
+    zoomImg.style.height = `${shown.h * scale}px`;
+    zoomImg.style.left = `${-bx / NATURAL.w * shown.w * scale}px`;
+    zoomImg.style.top = `${-by / NATURAL.h * shown.h * scale}px`;
+    zoom.hidden = false;
+  }
+  function hideZoom() {
+    zoom.hidden = true;
+  }
+  document.querySelectorAll("rect[data-id]").forEach((el) => {
+    el.addEventListener("mouseenter", () => {
+      // 画框模式下不放大；只显示命中时，没命中的框是看不见的，也不放大
+      if (viewer.classList.contains("drawing")) return;
+      if (viewer.classList.contains("has-hits") && !el.classList.contains("hit")) return;
+      showZoom(el);
+    });
+    el.addEventListener("mouseleave", hideZoom);
+  });
+</script>
+
+</main>
+<script src="../data.js"></script>
+<script src="../site.js"></script>
+</body>
+</html>

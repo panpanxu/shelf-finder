@@ -1,0 +1,10 @@
+{% extends "static/base.html" %}
+{% block title %}搜索 · 找书{% endblock %}
+{% block content %}
+<form class="row card" action="search.html" method="get">
+  <input type="search" name="q" required>
+  <button class="primary">搜索</button>
+</form>
+{# 结果由 site.js 在浏览器里从 data.js 算出来 #}
+<div id="results"></div>
+{% endblock %}

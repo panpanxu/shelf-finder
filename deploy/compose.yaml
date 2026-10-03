@@ -1,0 +1,12 @@
+# 飞牛 OS 上的 Compose 文件。先把开发机的 data/ 目录整个拷到飞牛，再把下面的宿主路径改成它所在的位置。
+services:
+  shelf-finder:
+    image: shelf-finder:viewer
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - /vol1/1000/shelf-finder/data:/data
+    restart: unless-stopped

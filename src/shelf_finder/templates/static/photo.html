@@ -1,0 +1,47 @@
+{% extends "static/base.html" %}
+{% block title %}{{ photo.name }} · 找书{% endblock %}
+{% block content %}
+<style>
+{% include "partials/viewer_style.html" %}
+</style>
+
+<h1>{{ photo.name }}</h1>
+<form class="row card" action="{{ photo.id }}.html" method="get">
+  <input type="search" name="q" placeholder="在这张照片里找">
+  <button class="primary">找</button>
+</form>
+<p class="muted" id="hit-note" hidden></p>
+
+<div class="layout" style="margin-top: 12px" id="layout" data-photo="{{ photo.id }}">
+  <div class="viewer-col">
+  <div class="viewer" id="viewer">
+    <img src="{{ photo.id }}.jpg" alt="{{ photo.name }}">
+    <svg id="overlay" viewBox="0 0 {{ photo.width }} {{ photo.height }}" preserveAspectRatio="none">
+      {% for spine_id, spine in spines %}
+      <rect data-id="{{ spine_id }}" x="{{ spine.box.x1 }}" y="{{ spine.box.y1 }}"
+            width="{{ spine.box.x2 - spine.box.x1 }}" height="{{ spine.box.y2 - spine.box.y1 }}"><title>{{ spine.text }}</title></rect>
+      {% endfor %}
+    </svg>
+    <div id="zoom" hidden><img src="{{ photo.id }}.jpg" alt=""></div>
+  </div>
+  </div>
+  <div class="spine-col">
+    <ul class="plain card" id="spines">
+      {% for spine_id, spine in spines %}
+      <li id="spine-{{ spine_id }}" data-id="{{ spine_id }}">
+        <span class="text">{{ spine.text }}</span>
+        <span class="meta">
+          <span class="tags">{% for tag in spine.tags %}<a class="tag" href="../search.html?q={{ tag | urlencode }}">{{ tag }}</a>{% endfor %}</span>
+          <a class="douban" href="{{ douban[spine_id] }}" data-query="{{ douban_query[spine_id] }}" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      {% else %}
+      <li class="muted">这张照片上没有识别出书脊。</li>
+      {% endfor %}
+    </ul>
+    <p class="muted">共 {{ spines | length }} 本书，上传于 {{ photo.created_at.replace("T", " ") }}。</p>
+  </div>
+</div>
+
+{% include "partials/viewer_script.html" %}
+{% endblock %}

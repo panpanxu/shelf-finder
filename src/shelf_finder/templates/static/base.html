@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}找书{% endblock %}</title>
+<style>
+{% include "partials/base_style.html" %}
+</style>
+</head>
+<body data-page="{{ page }}" data-root="{{ root }}">
+<main>
+  <nav><a href="{{ root }}index.html" id="nav-back">← 全部照片</a></nav>
+  {% block content %}{% endblock %}
+</main>
+<script src="{{ root }}data.js"></script>
+<script src="{{ root }}site.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+.venv/
+.git/
+.scratch/
+data/
+photo/
+tests/
+__pycache__/
+*.log

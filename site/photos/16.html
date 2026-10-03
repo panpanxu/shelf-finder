@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>客房第二层右 · 找书</title>
+<style>
+  :root {
+    --bg: #f6f3ee; --fg: #222; --muted: #777; --card: #fff; --line: #ddd6cc;
+    --accent: #c2410c; --accent-soft: rgba(194, 65, 12, 0.18); --hit-text: #d6006f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1a18; --fg: #eee; --muted: #999; --card: #262421; --line: #3a3733;
+      --accent: #fb923c; --accent-soft: rgba(251, 146, 60, 0.22); --hit-text: #ff5db1;
+    }
+  }
+  * { box-sizing: border-box; }
+  /* .row 这类 display: flex 的规则会盖过浏览器自带的 [hidden] 规则，这里把 hidden 属性重新立起来 */
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  a { color: var(--accent); text-decoration: none; }
+  h1 { font-size: 1.4rem; margin: 0 0 12px; }
+  h2 { font-size: 1.1rem; margin: 24px 0 8px; }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  form.inline { display: inline; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input[type=text], input[type=search] { flex: 1; min-width: 0; padding: 8px 10px; font-size: 1rem;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
+  button { padding: 8px 14px; font-size: 1rem; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--card); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  ul.plain { list-style: none; padding: 0; margin: 0; }
+  ul.plain li { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  nav { margin-bottom: 12px; }
+  /* 类型标签：小圆角底色块 */
+  .tag { display: inline-block; font-size: 0.78rem; font-weight: normal; line-height: 1.4; padding: 0 6px;
+    margin-left: 4px; border-radius: 999px; background: var(--accent-soft); color: var(--fg); white-space: nowrap; }
+  .tag-cloud { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+  .tag-cloud .tag { font-size: 0.95rem; padding: 2px 10px; margin: 0; }
+  .tag small { color: var(--muted); }
+  /* 豆瓣绿，和命中的洋红色区分开 */
+  a.douban { white-space: nowrap; font-size: 0.85rem; font-weight: normal; color: #2e963d; margin-left: 6px; }
+</style>
+</head>
+<body data-page="photo" data-root="../">
+<main>
+  <nav><a href="../index.html" id="nav-back">← 全部照片</a></nav>
+  
+<style>
+  /* 图片和覆盖层叠在同一个网格单元里，覆盖层的尺寸永远等于图片实际显示的尺寸 */
+  .viewer { display: grid; line-height: 0; max-width: 100%; }
+  .viewer > * { grid-area: 1 / 1; }
+  .viewer img { display: block; max-width: 100%; width: auto; height: auto; border-radius: 6px; }
+  .viewer svg { width: 100%; height: 100%; }
+  /* 放大镜：和图片叠在同一个网格单元里，自己定位；不接鼠标事件，免得遮住触发它的框 */
+  #zoom { position: relative; pointer-events: none; z-index: 1; justify-self: start; align-self: start; }
+  #zoom > div { position: absolute; overflow: hidden; border: 2px solid #fff; border-radius: 4px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5); background: #000; }
+  /* 放大用的图不受 .viewer img 的最大宽高限制，否则被压回原尺寸后只剩黑框 */
+  #zoom img { position: absolute; display: block; max-width: none; max-height: none; border-radius: 0; }
+  /* 框画在照片上，颜色不随明暗主题变：亮绿配黑色描边投影，在木色书架和深色书脊上都显眼 */
+  .viewer rect { fill: transparent; stroke: #39ff14; stroke-width: 3; vector-effect: non-scaling-stroke; cursor: pointer;
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer.has-hits rect { stroke: none; filter: none; }
+  .viewer rect.hit { stroke: #ff2d95; stroke-width: 4; fill: rgba(255, 45, 149, 0.28);
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer rect.active, .viewer.has-hits rect.active { stroke: #ff2d95; stroke-width: 6; fill: rgba(255, 45, 149, 0.4);
+    filter: drop-shadow(0 0 2px #000) drop-shadow(0 0 2px #000); }
+  /* 桌面宽度：整块布局占满视口剩余高度，图片在左栏居中、不随页面滚动，右栏列表在自己的范围里滚动。
+     --layout-top 是布局距离页面顶部的距离，由脚本量出来。 */
+  .layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+  .viewer-col { display: flex; align-items: center; justify-content: center; min-height: 0; }
+  @media (min-width: 761px) {
+    .layout { --available: calc(100dvh - var(--layout-top, 0px) - 16px); height: var(--available); }
+    .viewer-col { height: 100%; }
+    .viewer img { max-height: var(--available); }
+    .spine-col { height: 100%; overflow-y: auto; min-height: 0; }
+  }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+  /* 每本书两行：第一行书名和文字，第二行标签、豆瓣链接（和操作按钮） */
+  #spines li { cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+  #spines li .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-weight: normal; color: var(--fg); }
+  #spines li .meta .tags { display: flex; gap: 4px; flex-wrap: wrap; }
+  #spines li .meta .tag { margin-left: 0; }
+  #spines li.hit { font-weight: 600; color: var(--hit-text); border-left: 4px solid var(--hit-text); }
+  #spines li.active { background: var(--accent-soft); }
+</style>
+
+<h1>客房第二层右</h1>
+<form class="row card" action="16.html" method="get">
+  <input type="search" name="q" placeholder="在这张照片里找">
+  <button class="primary">找</button>
+</form>
+<p class="muted" id="hit-note" hidden></p>
+
+<div class="layout" style="margin-top: 12px" id="layout" data-photo="16">
+  <div class="viewer-col">
+  <div class="viewer" id="viewer">
+    <img src="16.jpg" alt="客房第二层右">
+    <svg id="overlay" viewBox="0 0 2000 922" preserveAspectRatio="none">
+      
+      <rect data-id="564" x="175" y="383"
+            width="40" height="500"><title>一间自己的房间 英弗吉尼亚·伍尔夫著 谷妙婷译 译林出版社</title></rect>
+      
+      <rect data-id="565" x="262" y="19"
+            width="459" height="52"><title>法医档案 英奈杰尔·麦克雷里 中信出版集团</title></rect>
+      
+      <rect data-id="566" x="267" y="329"
+            width="38" height="278"><title>假装思考 林采宜著</title></rect>
+      
+      <rect data-id="567" x="320" y="188"
+            width="69" height="588"><title>自卑与超越 What Life Could Mean to You 奥阿尔弗雷德·阿德勒</title></rect>
+      
+      <rect data-id="568" x="369" y="71"
+            width="319" height="55"><title>战争并非如你所料 [法] 邦雅曼·布里约 著 [法] 阿卡迪·皮卡德 绘</title></rect>
+      
+      <rect data-id="569" x="392" y="211"
+            width="156" height="673"><title>故事写作大师班 约翰·特鲁比 著 江先声 译 湖南文艺出版社</title></rect>
+      
+      <rect data-id="570" x="563" y="174"
+            width="70" height="246"><title>小说课（增订版） 毕飞宇 人民文学出版社</title></rect>
+      
+      <rect data-id="572" x="645" y="99"
+            width="47" height="723"><title>这样写出好故事 WRITE GREAT FICTION: PLOT &amp; STRUCTURE 第五次再版修订 美詹姆斯·斯科特·贝尔 湖南文艺出版社</title></rect>
+      
+      <rect data-id="573" x="721" y="255"
+            width="34" height="605"><title>关于写作：一只鸟接着一只鸟 美安拉莫特著 朱耘译 商务印书馆</title></rect>
+      
+      <rect data-id="574" x="776" y="299"
+            width="41" height="552"><title>25堂文学解剖课 美罗伊·彼得·克拉克著 王旭译 大象出版社</title></rect>
+      
+      <rect data-id="575" x="815" y="184"
+            width="59" height="681"><title>小说的骨架 OUTLINING YOUR NOVEL MAP 江西人民出版社</title></rect>
+      
+      <rect data-id="576" x="899" y="82"
+            width="94" height="750"><title>剧本：影视写作的艺术、技巧和商业运作 杨劲性译 美理查德·沃尔特著 天津人民出版社</title></rect>
+      
+      <rect data-id="577" x="1006" y="260"
+            width="103" height="568"><title>故事 STORY 【美】罗伯特·麦基 天津出版传媒集团 果麦</title></rect>
+      
+      <rect data-id="585" x="1121" y="259"
+            width="72" height="583"><title>对白 DIALOGUE 【美】罗伯特·麦基 天津出版传媒集团 果麦</title></rect>
+      
+      <rect data-id="578" x="1220" y="290"
+            width="28" height="530"><title>畅销作家写作全技巧 【日】大泽在昌 程亮译 浙江人民出版社</title></rect>
+      
+      <rect data-id="579" x="1317" y="266"
+            width="81" height="393"><title>撒马尔罕的金桃：唐代舶来品研究 THE GOLDEN PEACHES OF SAMARKAND: A Study of T&#39;ang Exotics 【美】薛爱华作品 吴玉贵译 Edward Hetzel Schafer</title></rect>
+      
+      <rect data-id="580" x="1482" y="196"
+            width="36" height="406"><title>作家的灵感宝库 美弗雷德·怀特著 张净译</title></rect>
+      
+      <rect data-id="581" x="1551" y="264"
+            width="44" height="378"><title>编剧心理学：在剧本中建构冲突 美威廉·尹迪克 并迎兆译</title></rect>
+      
+      <rect data-id="582" x="1615" y="160"
+            width="43" height="493"><title>电影编剧的秘密 王天兵 芦苇</title></rect>
+      
+      <rect data-id="583" x="1654" y="271"
+            width="41" height="560"><title>创造难忘的人物 CREATING UNFORGETTABLE CHARACTERS Linda Seger 文化发展出版社</title></rect>
+      
+      <rect data-id="584" x="1719" y="278"
+            width="26" height="338"><title>开发故事创意 美迈克尔·拉泽格著 胡晓华 侃明译</title></rect>
+      
+    </svg>
+    <div id="zoom" hidden><img src="16.jpg" alt=""></div>
+  </div>
+  </div>
+  <div class="spine-col">
+    <ul class="plain card" id="spines">
+      
+      <li id="spine-564" data-id="564">
+        <span class="text">一间自己的房间 英弗吉尼亚·伍尔夫著 谷妙婷译 译林出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E5%BF%83%E7%90%86%E5%AD%A6">心理学</a><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E4%B8%80%E9%97%B4%E8%87%AA%E5%B7%B1%E7%9A%84%E6%88%BF%E9%97%B4+%E8%8B%B1%E5%BC%97%E5%90%89%E5%B0%BC%E4%BA%9A%C2%B7%E4%BC%8D%E5%B0%94%E5%A4%AB+%E8%B0%B7%E5%A6%99%E5%A9%B7+%E8%AF%91%E6%9E%97%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="一间自己的房间 英弗吉尼亚·伍尔夫 谷妙婷 译林出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-565" data-id="565">
+        <span class="text">法医档案 英奈杰尔·麦克雷里 中信出版集团</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E7%A7%91%E6%99%AE">科普</a><a class="tag" href="../search.html?q=%E7%A4%BE%E4%BC%9A%E7%A7%91%E5%AD%A6">社会科学</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%B3%95%E5%8C%BB%E6%A1%A3%E6%A1%88+%E8%8B%B1%E5%A5%88%E6%9D%B0%E5%B0%94%C2%B7%E9%BA%A6%E5%85%8B%E9%9B%B7%E9%87%8C+%E4%B8%AD%E4%BF%A1%E5%87%BA%E7%89%88%E9%9B%86%E5%9B%A2&amp;cat=1001" data-query="法医档案 英奈杰尔·麦克雷里 中信出版集团" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-566" data-id="566">
+        <span class="text">假装思考 林采宜著</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a><a class="tag" href="../search.html?q=%E7%A4%BE%E4%BC%9A%E7%A7%91%E5%AD%A6">社会科学</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%81%87%E8%A3%85%E6%80%9D%E8%80%83+%E6%9E%97%E9%87%87%E5%AE%9C&amp;cat=1001" data-query="假装思考 林采宜" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-567" data-id="567">
+        <span class="text">自卑与超越 What Life Could Mean to You 奥阿尔弗雷德·阿德勒</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%BF%83%E7%90%86%E5%AD%A6">心理学</a><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E8%87%AA%E5%8D%91%E4%B8%8E%E8%B6%85%E8%B6%8A+%E5%A5%A5%E9%98%BF%E5%B0%94%E5%BC%97%E9%9B%B7%E5%BE%B7%C2%B7%E9%98%BF%E5%BE%B7%E5%8B%92&amp;cat=1001" data-query="自卑与超越 奥阿尔弗雷德·阿德勒" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-568" data-id="568">
+        <span class="text">战争并非如你所料 [法] 邦雅曼·布里约 著 [法] 阿卡迪·皮卡德 绘</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%96%E7%95%8C%E5%8E%86%E5%8F%B2">世界历史</a><a class="tag" href="../search.html?q=%E7%A7%91%E6%99%AE">科普</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%88%98%E4%BA%89%E5%B9%B6%E9%9D%9E%E5%A6%82%E4%BD%A0%E6%89%80%E6%96%99+%E9%82%A6%E9%9B%85%E6%9B%BC%C2%B7%E5%B8%83%E9%87%8C%E7%BA%A6+%E9%98%BF%E5%8D%A1%E8%BF%AA%C2%B7%E7%9A%AE%E5%8D%A1%E5%BE%B7+%E7%BB%98&amp;cat=1001" data-query="战争并非如你所料 邦雅曼·布里约 阿卡迪·皮卡德 绘" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-569" data-id="569">
+        <span class="text">故事写作大师班 约翰·特鲁比 著 江先声 译 湖南文艺出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%95%85%E4%BA%8B%E5%86%99%E4%BD%9C%E5%A4%A7%E5%B8%88%E7%8F%AD+%E7%BA%A6%E7%BF%B0%C2%B7%E7%89%B9%E9%B2%81%E6%AF%94+%E6%B1%9F%E5%85%88%E5%A3%B0+%E6%B9%96%E5%8D%97%E6%96%87%E8%89%BA%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="故事写作大师班 约翰·特鲁比 江先声 湖南文艺出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-570" data-id="570">
+        <span class="text">小说课（增订版） 毕飞宇 人民文学出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%B0%8F%E8%AF%B4%E8%AF%BE+%E6%AF%95%E9%A3%9E%E5%AE%87+%E4%BA%BA%E6%B0%91%E6%96%87%E5%AD%A6%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="小说课 毕飞宇 人民文学出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-572" data-id="572">
+        <span class="text">这样写出好故事 WRITE GREAT FICTION: PLOT &amp; STRUCTURE 第五次再版修订 美詹姆斯·斯科特·贝尔 湖南文艺出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E8%BF%99%E6%A0%B7%E5%86%99%E5%87%BA%E5%A5%BD%E6%95%85%E4%BA%8B+%E7%BE%8E%E8%A9%B9%E5%A7%86%E6%96%AF%C2%B7%E6%96%AF%E7%A7%91%E7%89%B9%C2%B7%E8%B4%9D%E5%B0%94+%E6%B9%96%E5%8D%97%E6%96%87%E8%89%BA%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="这样写出好故事 美詹姆斯·斯科特·贝尔 湖南文艺出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-573" data-id="573">
+        <span class="text">关于写作：一只鸟接着一只鸟 美安拉莫特著 朱耘译 商务印书馆</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%85%B3%E4%BA%8E%E5%86%99%E4%BD%9C%EF%BC%9A%E4%B8%80%E5%8F%AA%E9%B8%9F%E6%8E%A5%E7%9D%80%E4%B8%80%E5%8F%AA%E9%B8%9F+%E7%BE%8E%E5%AE%89%E6%8B%89%E8%8E%AB%E7%89%B9+%E6%9C%B1%E8%80%98+%E5%95%86%E5%8A%A1%E5%8D%B0%E4%B9%A6%E9%A6%86&amp;cat=1001" data-query="关于写作：一只鸟接着一只鸟 美安拉莫特 朱耘 商务印书馆" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-574" data-id="574">
+        <span class="text">25堂文学解剖课 美罗伊·彼得·克拉克著 王旭译 大象出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=25+%E5%A0%82%E6%96%87%E5%AD%A6%E8%A7%A3%E5%89%96%E8%AF%BE+%E7%BE%8E%E7%BD%97%E4%BC%8A%C2%B7%E5%BD%BC%E5%BE%97%C2%B7%E5%85%8B%E6%8B%89%E5%85%8B+%E7%8E%8B%E6%97%AD+%E5%A4%A7%E8%B1%A1%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="25 堂文学解剖课 美罗伊·彼得·克拉克 王旭 大象出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-575" data-id="575">
+        <span class="text">小说的骨架 OUTLINING YOUR NOVEL MAP 江西人民出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%B0%8F%E8%AF%B4%E7%9A%84%E9%AA%A8%E6%9E%B6+%E6%B1%9F%E8%A5%BF%E4%BA%BA%E6%B0%91%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="小说的骨架 江西人民出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-576" data-id="576">
+        <span class="text">剧本：影视写作的艺术、技巧和商业运作 杨劲性译 美理查德·沃尔特著 天津人民出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E7%94%B5%E5%BD%B1%E6%88%8F%E5%89%A7">电影戏剧</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%89%A7%E6%9C%AC%EF%BC%9A%E5%BD%B1%E8%A7%86%E5%86%99%E4%BD%9C%E7%9A%84%E8%89%BA%E6%9C%AF%E3%80%81%E6%8A%80%E5%B7%A7%E5%92%8C%E5%95%86%E4%B8%9A%E8%BF%90%E4%BD%9C+%E6%9D%A8%E5%8A%B2%E6%80%A7+%E7%BE%8E%E7%90%86%E6%9F%A5%E5%BE%B7%C2%B7%E6%B2%83%E5%B0%94%E7%89%B9+%E5%A4%A9%E6%B4%A5%E4%BA%BA%E6%B0%91%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="剧本：影视写作的艺术、技巧和商业运作 杨劲性 美理查德·沃尔特 天津人民出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-577" data-id="577">
+        <span class="text">故事 STORY 【美】罗伯特·麦基 天津出版传媒集团 果麦</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E7%94%B5%E5%BD%B1%E6%88%8F%E5%89%A7">电影戏剧</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%95%85%E4%BA%8B+%E7%BD%97%E4%BC%AF%E7%89%B9%C2%B7%E9%BA%A6%E5%9F%BA+%E5%A4%A9%E6%B4%A5%E5%87%BA%E7%89%88%E4%BC%A0%E5%AA%92%E9%9B%86%E5%9B%A2+%E6%9E%9C%E9%BA%A6&amp;cat=1001" data-query="故事 罗伯特·麦基 天津出版传媒集团 果麦" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-585" data-id="585">
+        <span class="text">对白 DIALOGUE 【美】罗伯特·麦基 天津出版传媒集团 果麦</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E7%94%B5%E5%BD%B1%E6%88%8F%E5%89%A7">电影戏剧</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%AF%B9%E7%99%BD+%E7%BD%97%E4%BC%AF%E7%89%B9%C2%B7%E9%BA%A6%E5%9F%BA+%E5%A4%A9%E6%B4%A5%E5%87%BA%E7%89%88%E4%BC%A0%E5%AA%92%E9%9B%86%E5%9B%A2+%E6%9E%9C%E9%BA%A6&amp;cat=1001" data-query="对白 罗伯特·麦基 天津出版传媒集团 果麦" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-578" data-id="578">
+        <span class="text">畅销作家写作全技巧 【日】大泽在昌 程亮译 浙江人民出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%95%85%E9%94%80%E4%BD%9C%E5%AE%B6%E5%86%99%E4%BD%9C%E5%85%A8%E6%8A%80%E5%B7%A7+%E5%A4%A7%E6%B3%BD%E5%9C%A8%E6%98%8C+%E7%A8%8B%E4%BA%AE+%E6%B5%99%E6%B1%9F%E4%BA%BA%E6%B0%91%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="畅销作家写作全技巧 大泽在昌 程亮 浙江人民出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-579" data-id="579">
+        <span class="text">撒马尔罕的金桃：唐代舶来品研究 THE GOLDEN PEACHES OF SAMARKAND: A Study of T&#39;ang Exotics 【美】薛爱华作品 吴玉贵译 Edward Hetzel Schafer</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E4%B8%96%E7%95%8C%E5%8E%86%E5%8F%B2">世界历史</a><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%92%92%E9%A9%AC%E5%B0%94%E7%BD%95%E7%9A%84%E9%87%91%E6%A1%83%EF%BC%9A%E5%94%90%E4%BB%A3%E8%88%B6%E6%9D%A5%E5%93%81%E7%A0%94%E7%A9%B6+%E8%96%9B%E7%88%B1%E5%8D%8E%E4%BD%9C%E5%93%81+%E5%90%B4%E7%8E%89%E8%B4%B5&amp;cat=1001" data-query="撒马尔罕的金桃：唐代舶来品研究 薛爱华作品 吴玉贵" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-580" data-id="580">
+        <span class="text">作家的灵感宝库 美弗雷德·怀特著 张净译</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E4%BD%9C%E5%AE%B6%E7%9A%84%E7%81%B5%E6%84%9F%E5%AE%9D%E5%BA%93+%E7%BE%8E%E5%BC%97%E9%9B%B7%E5%BE%B7%C2%B7%E6%80%80%E7%89%B9+%E5%BC%A0%E5%87%80&amp;cat=1001" data-query="作家的灵感宝库 美弗雷德·怀特 张净" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-581" data-id="581">
+        <span class="text">编剧心理学：在剧本中建构冲突 美威廉·尹迪克 并迎兆译</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%BF%83%E7%90%86%E5%AD%A6">心理学</a><a class="tag" href="../search.html?q=%E7%94%B5%E5%BD%B1%E6%88%8F%E5%89%A7">电影戏剧</a><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%BC%96%E5%89%A7%E5%BF%83%E7%90%86%E5%AD%A6%EF%BC%9A%E5%9C%A8%E5%89%A7%E6%9C%AC%E4%B8%AD%E5%BB%BA%E6%9E%84%E5%86%B2%E7%AA%81+%E7%BE%8E%E5%A8%81%E5%BB%89%C2%B7%E5%B0%B9%E8%BF%AA%E5%85%8B+%E5%B9%B6%E8%BF%8E%E5%85%86&amp;cat=1001" data-query="编剧心理学：在剧本中建构冲突 美威廉·尹迪克 并迎兆" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-582" data-id="582">
+        <span class="text">电影编剧的秘密 王天兵 芦苇</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E7%94%B5%E5%BD%B1%E6%88%8F%E5%89%A7">电影戏剧</a><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%94%B5%E5%BD%B1%E7%BC%96%E5%89%A7%E7%9A%84%E7%A7%98%E5%AF%86+%E7%8E%8B%E5%A4%A9%E5%85%B5+%E8%8A%A6%E8%8B%87&amp;cat=1001" data-query="电影编剧的秘密 王天兵 芦苇" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-583" data-id="583">
+        <span class="text">创造难忘的人物 CREATING UNFORGETTABLE CHARACTERS Linda Seger 文化发展出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E7%94%B5%E5%BD%B1%E6%88%8F%E5%89%A7">电影戏剧</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%88%9B%E9%80%A0%E9%9A%BE%E5%BF%98%E7%9A%84%E4%BA%BA%E7%89%A9+%E6%96%87%E5%8C%96%E5%8F%91%E5%B1%95%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="创造难忘的人物 文化发展出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+      <li id="spine-584" data-id="584">
+        <span class="text">开发故事创意 美迈克尔·拉泽格著 胡晓华 侃明译</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%86%99%E4%BD%9C">写作</a><a class="tag" href="../search.html?q=%E7%94%B5%E5%BD%B1%E6%88%8F%E5%89%A7">电影戏剧</a></span>
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%BC%80%E5%8F%91%E6%95%85%E4%BA%8B%E5%88%9B%E6%84%8F+%E7%BE%8E%E8%BF%88%E5%85%8B%E5%B0%94%C2%B7%E6%8B%89%E6%B3%BD%E6%A0%BC+%E8%83%A1%E6%99%93%E5%8D%8E+%E4%BE%83%E6%98%8E&amp;cat=1001" data-query="开发故事创意 美迈克尔·拉泽格 胡晓华 侃明" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+        </span>
+      </li>
+      
+    </ul>
+    <p class="muted">共 21 本书，上传于 2026-10-03 11:40:01。</p>
+  </div>
+</div>
+
+<script>
+  // 量出布局距页面顶部的距离，供样式算出视口里剩余的高度；窗口大小变了重新量
+  const layout = document.getElementById("layout");
+  function measureLayoutTop() {
+    layout.style.setProperty("--layout-top", `${layout.getBoundingClientRect().top + window.scrollY}px`);
+  }
+  measureLayoutTop();
+  window.addEventListener("resize", measureLayoutTop);
+
+  const viewer = document.getElementById("viewer");
+  const photoImg = viewer.querySelector("img");
+  const NATURAL = { w: 2000, h: 922 };
+
+  // 点框或点列表项，两边同时高亮同一本书
+  function activate(id, scroll) {
+    document.querySelectorAll(".active").forEach((el) => el.classList.remove("active"));
+    document.querySelectorAll(`[data-id="${id}"]`).forEach((el) => el.classList.add("active"));
+    if (scroll) document.getElementById(`spine-${id}`).scrollIntoView({ block: "nearest" });
+  }
+  document.querySelectorAll("rect[data-id]").forEach((el) => el.addEventListener("click", () => activate(el.dataset.id, true)));
+  document.querySelectorAll("#spines li[data-id]").forEach((el) => el.addEventListener("click", (event) => {
+    if (event.target.closest(".tools, .douban, .tag")) return;
+    activate(el.dataset.id, false);
+  }));
+  const target = location.hash.match(/^#spine-(\d+)$/);
+  if (target) activate(target[1], true);
+
+  // 鼠标停在框上：把这条书脊放大到与整张图等高（竖排）或等宽（横排），居中盖在照片上；移开就消失
+  const zoom = document.getElementById("zoom");
+  const zoomImg = zoom.querySelector("img");
+  function showZoom(rect) {
+    const shown = { w: photoImg.clientWidth, h: photoImg.clientHeight };
+    const [bx, by, bw, bh] = ["x", "y", "width", "height"].map((k) => Number(rect.getAttribute(k)));
+    // 框在屏幕上的尺寸
+    const sw = bw / NATURAL.w * shown.w, sh = bh / NATURAL.h * shown.h;
+    // 竖排按高放大到整张图的高，横排按宽放大到整张图的宽；另一边不许超出图片
+    const scale = bh >= bw ? Math.min(shown.h / sh, shown.w / sw) : Math.min(shown.w / sw, shown.h / sh);
+    const cw = sw * scale, ch = sh * scale;
+    let frame = zoom.firstElementChild;
+    if (frame.tagName !== "DIV") {
+      frame = document.createElement("div");
+      frame.append(zoomImg);
+      zoom.prepend(frame);
+    }
+    frame.style.width = `${cw}px`;
+    frame.style.height = `${ch}px`;
+    frame.style.left = `${(shown.w - cw) / 2}px`;
+    frame.style.top = `${(shown.h - ch) / 2}px`;
+    zoomImg.style.width = `${shown.w * scale}px`;
+    zoomImg.style.height = `${shown.h * scale}px`;
+    zoomImg.style.left = `${-bx / NATURAL.w * shown.w * scale}px`;
+    zoomImg.style.top = `${-by / NATURAL.h * shown.h * scale}px`;
+    zoom.hidden = false;
+  }
+  function hideZoom() {
+    zoom.hidden = true;
+  }
+  document.querySelectorAll("rect[data-id]").forEach((el) => {
+    el.addEventListener("mouseenter", () => {
+      // 画框模式下不放大；只显示命中时，没命中的框是看不见的，也不放大
+      if (viewer.classList.contains("drawing")) return;
+      if (viewer.classList.contains("has-hits") && !el.classList.contains("hit")) return;
+      showZoom(el);
+    });
+    el.addEventListener("mouseleave", hideZoom);
+  });
+</script>
+
+</main>
+<script src="../data.js"></script>
+<script src="../site.js"></script>
+</body>
+</html>

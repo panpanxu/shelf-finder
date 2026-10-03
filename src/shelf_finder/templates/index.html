@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>找书</h1>
+
+<form class="row card" action="/search" method="get">
+  <input type="search" name="q" value="{{ q }}" placeholder="书名、作者或出版社" required autofocus>
+  <button class="primary">搜索</button>
+</form>
+
+{% if recognition %}
+<h2>上传书架照片</h2>
+<form class="card" action="/photos" method="post" enctype="multipart/form-data" id="upload">
+  <div class="row">
+    <input type="text" name="name" placeholder="这面书架在哪，例如：书房左架第二层" required>
+  </div>
+  <div class="row" style="margin-top: 8px">
+    <input type="file" name="image" accept="image/*,.heic,.heif" required>
+    <button class="primary">上传并识别</button>
+  </div>
+  <p class="muted" id="upload-hint">识别一张照片大约需要一分钟。</p>
+</form>
+{% endif %}
+
+{% if tag_counts %}
+<h2>按类型找</h2>
+<p class="card tag-cloud">
+  {% for tag, n in tag_counts %}<a class="tag" href="/search?q={{ tag | urlencode }}">{{ tag }} <small>{{ n }}</small></a>{% endfor %}
+</p>
+{% endif %}
+
+<h2>全部照片</h2>
+{% if photos %}
+<p class="muted">共 {{ photos | length }} 张照片，{{ total_books }} 本书。</p>
+<ul class="plain card">
+  {% for photo in photos %}
+  <li><a href="/photos/{{ photo.id }}">{{ photo.name }}</a>
+    <span class="muted">{{ counts.get(photo.id, 0) }} 本 · {{ photo.created_at.replace("T", " ") }}</span></li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">还没有照片。</p>
+{% endif %}
+
+{% if recognition %}
+<script>
+  document.getElementById("upload").addEventListener("submit", (event) => {
+    event.target.querySelector("button").disabled = true;
+    document.getElementById("upload-hint").textContent = "正在识别，请稍候……";
+  });
+</script>
+{% endif %}
+{% endblock %}
