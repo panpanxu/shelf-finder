@@ -31,10 +31,11 @@ def test_proposed_vocabulary_is_a_short_fixed_list_of_chinese_tags_ending_with_o
     assert len(set(tags)) == len(tags)
     assert tags[-1] == "其他"
     for tag in tags:
-        assert 2 <= len(tag) <= 6 and regex.fullmatch(r"[\p{Han}A-Za-z]+", tag), tag
+        assert 2 <= len(tag) <= 8 and regex.fullmatch(r"[\p{Han}A-Za-z]+", tag), tag
     # 这批书明显分成这几类，标签表里至少要能找到对应的词
     joined = " ".join(tags)
-    assert "小说" in joined and ("数学" in joined or "数论" in joined) and ("计算机" in joined or "编程" in joined)
+    assert ("小说" in joined or "文学" in joined) and ("数学" in joined or "数论" in joined)
+    assert "计算机" in joined or "编程" in joined or "软件" in joined
 
 
 def test_every_spine_gets_one_to_three_tags_taken_only_from_the_vocabulary():

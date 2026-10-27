@@ -36,7 +36,13 @@
     const allowed = Math.floor(needle.length / 5);
     const tag = DATA.vocabulary.find((t) => normalize(t) === needle);
     const hits = [];
+    // 一本书可能出现在几张照片上，只保留最新照片上的那条作为它的位置
+    const latest = new Map();
     for (const spine of DATA.spines) {
+      const seen = latest.get(spine.book);
+      if (!seen || spine.photo > seen.photo) latest.set(spine.book, spine);
+    }
+    for (const spine of latest.values()) {
       if (tag && spine.tags.includes(tag)) {
         hits.push({ spine, errors: 0 });
         continue;
@@ -91,7 +97,11 @@
         list.append(el("li", {}, [
           el("a", { href: `${href}#spine-${spine.id}` }, [spine.text]),
           ...tagLinks(spine.tags),
-          el("a", { class: "douban", href: doubanUrl(spine.dq), target: "_blank", rel: "noopener", title: "在豆瓣搜索这本书" }, ["豆瓣"]),
+          spine.douban
+            ? el("a", { class: "douban", href: spine.douban, target: "_blank", rel: "noopener", title: "打开豆瓣条目" }, ["豆瓣条目"])
+            : el("a", { class: "douban", href: doubanUrl(spine.dq), target: "_blank", rel: "noopener", title: "在豆瓣搜索这本书" }, ["豆瓣"]),
+          ...spine.adaptations.map(([title, url]) =>
+            el("a", url ? { class: "adaptation", href: url, target: "_blank", rel: "noopener" } : { class: "adaptation" }, [`影视：${title}`])),
         ]));
       }
       results.append(list);

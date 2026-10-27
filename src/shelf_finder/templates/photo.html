@@ -16,6 +16,8 @@
   #spines li .tools button { padding: 2px 8px; font-size: 0.85rem; }
   #spines li.editor { display: block; cursor: default; background: var(--accent-soft); }
   .editor form { display: flex; flex-direction: column; gap: 6px; }
+  .editor textarea { padding: 8px 10px; font: inherit; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--card); color: var(--fg); resize: vertical; }
   .editor .hint { font-size: 0.85rem; color: var(--muted); }
   .editor .hint.ready { color: var(--hit-text); }
 </style>
@@ -42,7 +44,7 @@
   <div class="viewer{% if hit_ids %} has-hits{% endif %}" id="viewer">
     <img src="/photos/{{ photo.id }}/image" alt="{{ photo.name }}">
     <svg id="overlay" viewBox="0 0 {{ photo.width }} {{ photo.height }}" preserveAspectRatio="none">
-      {% for spine_id, spine in spines %}
+      {% for spine_id, spine, book in spines %}
       <rect data-id="{{ spine_id }}" class="{% if spine_id in hit_ids %}hit{% endif %}"
             x="{{ spine.box.x1 }}" y="{{ spine.box.y1 }}"
             width="{{ spine.box.x2 - spine.box.x1 }}" height="{{ spine.box.y2 - spine.box.y1 }}"><title>{{ spine.text }}</title></rect>
@@ -53,12 +55,13 @@
   </div>
   <div class="spine-col">
     <ul class="plain card" id="spines">
-      {% for spine_id, spine in spines %}
-      <li id="spine-{{ spine_id }}" data-id="{{ spine_id }}" class="{% if spine_id in hit_ids %}hit{% endif %}">
+      {% for spine_id, spine, book in spines %}
+      <li id="spine-{{ spine_id }}" data-id="{{ spine_id }}" class="{% if spine_id in hit_ids %}hit{% endif %}" data-book="{{ book.id }}">
         <span class="text">{{ spine.text }}</span>
         <span class="meta">
-          <span class="tags">{% for tag in spine.tags %}<a class="tag" href="/search?q={{ tag | urlencode }}">{{ tag }}</a>{% endfor %}</span>
-          <a class="douban" href="{{ douban[spine_id] }}" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          <span class="tags">{% for tag in book.tags %}<a class="tag" href="/search?q={{ tag | urlencode }}">{{ tag }}</a>{% endfor %}</span>
+          <a class="douban" href="{{ douban[book.id] }}" data-url="{{ book.douban_url }}" target="_blank" rel="noopener" title="{% if book.douban_url %}打开豆瓣条目{% else %}在豆瓣搜索这本书{% endif %}">豆瓣{% if book.douban_url %}条目{% endif %}</a>
+          {% for title, url in book.adaptations %}<a class="adaptation" {% if url %}href="{{ url }}" target="_blank" rel="noopener"{% endif %} title="改编作品">影视：{{ title }}</a>{% endfor %}
           <span class="tools">
             <button type="button" data-act="edit">改</button>
             <button type="button" data-act="insert">插入</button>
@@ -94,6 +97,8 @@
       {% if vocabulary %}
       <input type="text" name="tags" list="vocabulary" placeholder="类型标签，一到三个，用顿号隔开">
       {% endif %}
+      <input type="text" name="douban_url" placeholder="豆瓣条目链接，留空则用搜索页">
+      <textarea name="adaptations" rows="2" placeholder="改编的影视作品，每行一部：标题 链接"></textarea>
       <input type="hidden" name="x1"><input type="hidden" name="y1"><input type="hidden" name="x2"><input type="hidden" name="y2">
       <span class="hint"></span>
       <span class="row">
@@ -142,7 +147,10 @@
       form.action = `/photos/${PHOTO}/spines/${id}/update`;
       form.text.value = li.querySelector(".text").textContent.trim();
       if (form.tags) form.tags.value = [...li.querySelectorAll(".tag")].map((t) => t.textContent).join("、");
-      hint.textContent = "改文字或标签后保存；要改位置就在照片上重新拖一个框。";
+      form.douban_url.value = li.querySelector(".douban").dataset.url;
+      form.adaptations.value = [...li.querySelectorAll(".adaptation")]
+        .map((a) => `${a.textContent.replace(/^影视：/, "")} ${a.getAttribute("href") || ""}`.trim()).join("\n");
+      hint.textContent = "改文字、标签、豆瓣链接或改编作品后保存；要改位置就在照片上重新拖一个框。";
       li.after(editor);
     } else {
       form.action = `/photos/${PHOTO}/spines/${id}/insert`;

@@ -24,10 +24,23 @@ def split_tags(text: str) -> list[str] | None:
     return parts or None
 
 
-def douban_links(request: Request, spines) -> dict[int, str]:
-    # 每条书脊对应的豆瓣搜索链接，按书脊 id 索引；手机浏览器给手机版搜索页
+def split_adaptations(text: str) -> list[tuple[str, str]]:
+    # 每行一部作品：「标题 链接」，链接可以没有
+    items = []
+    for line in text.splitlines():
+        parts = line.strip().split()
+        if not parts:
+            continue
+        url = parts[-1] if parts[-1].startswith("http") and len(parts) > 1 else ""
+        title = " ".join(parts[:-1] if url else parts)
+        items.append((title, url))
+    return items
+
+
+def douban_links(request: Request, books) -> dict[int, str]:
+    # 每本书的豆瓣链接，按书 id 索引：存了条目链接就用它，否则给搜索页；手机浏览器给手机版搜索页
     mobile = bool(MOBILE_BROWSER.search(request.headers.get("user-agent", "")))
-    return {spine_id: douban_search_url(spine.text, mobile) for spine_id, spine in spines}
+    return {book.id: book.douban_url or douban_search_url(book.title, mobile) for book in books}
 
 
 def create_app(library: Library, recognition: bool = True) -> FastAPI:
@@ -66,7 +79,7 @@ def create_app(library: Library, recognition: bool = True) -> FastAPI:
             {
                 "photos": library.list_photos(),
                 "counts": counts,
-                "total_books": sum(counts.values()),
+                "total_books": len(library.list_books()),
                 "tag_counts": library.tag_counts(),
                 "q": q,
             },
@@ -80,28 +93,29 @@ def create_app(library: Library, recognition: bool = True) -> FastAPI:
 
     @app.get("/search")
     def search(request: Request, q: str = ""):
-        # 按照片分组，组的顺序跟随组内最好的命中
+        # 按照片分组，组的顺序跟随组内最好的命中；不在任何照片上的书归到最后一组
         groups = {}
         hits = library.search(q)
         for hit in hits:
-            groups.setdefault(hit.photo.id, (hit.photo, []))[1].append(hit)
-        douban = douban_links(request, [(hit.spine_id, hit.spine) for hit in hits])
-        return TEMPLATES.TemplateResponse(
-            request, "search.html", {"q": q, "groups": list(groups.values()), "douban": douban}
-        )
+            key = hit.photo.id if hit.photo else None
+            groups.setdefault(key, (hit.photo, []))[1].append(hit)
+        ordered = [groups[k] for k in groups if k is not None] + ([groups[None]] if None in groups else [])
+        douban = douban_links(request, [hit.book for hit in hits])
+        return TEMPLATES.TemplateResponse(request, "search.html", {"q": q, "groups": ordered, "douban": douban})
 
     @app.get("/photos/{photo_id}")
     def photo_page(request: Request, photo_id: int, q: str = ""):
         photo = library.get_photo(photo_id)
-        hit_ids = {hit.spine_id for hit in library.search(q) if hit.photo.id == photo_id}
         spines = library.spines(photo_id)
+        matched = {book.id for book, _ in library.search_books(q)}
+        hit_ids = {spine_id for spine_id, _, book in spines if book.id in matched}
         return TEMPLATES.TemplateResponse(
             request,
             "photo.html",
             {
                 "photo": photo,
                 "spines": spines,
-                "douban": douban_links(request, spines),
+                "douban": douban_links(request, [book for _, _, book in spines]),
                 "vocabulary": library.vocabulary(),
                 "q": q,
                 "hit_ids": hit_ids,
@@ -124,10 +138,17 @@ def create_app(library: Library, recognition: bool = True) -> FastAPI:
         x2: int | None = Form(None),
         y2: int | None = Form(None),
         tags: str = Form(""),
+        douban_url: str = Form(""),
+        adaptations: str = Form(""),
     ):
+        # 文字和框改在书脊上；标签、豆瓣链接、改编作品改在这条书脊指向的书上。
         # 没重画框时四个坐标都不传，框保持原样；标签留空表示不改
         box = None if x1 is None else box_from_form(x1, y1, x2, y2)
-        library.update_spine(spine_id, text=text, box=box, tags=split_tags(tags))
+        book = next(book for sid, _, book in library.spines(photo_id) if sid == spine_id)
+        library.update_spine(spine_id, text=text, box=box)
+        library.update_book(
+            book.id, tags=split_tags(tags), douban_url=douban_url, adaptations=split_adaptations(adaptations)
+        )
         return RedirectResponse(f"/photos/{photo_id}#spine-{spine_id}", status_code=303)
 
     @app.post("/photos/{photo_id}/spines/{spine_id}/insert")
@@ -146,7 +167,7 @@ def create_app(library: Library, recognition: bool = True) -> FastAPI:
     @app.post("/photos/{photo_id}/spines/{spine_id}/delete")
     def delete_spine(photo_id: int, spine_id: int):
         # 删完回到相邻的那一行，列表不会跳回最上面
-        ids = [i for i, _ in library.spines(photo_id)]
+        ids = [i for i, _, _ in library.spines(photo_id)]
         library.delete_spine(spine_id)
         index = ids.index(spine_id)
         below = ids[index + 1 : index + 2]

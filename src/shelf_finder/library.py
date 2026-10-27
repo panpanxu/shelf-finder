@@ -1,7 +1,8 @@
 import io
+import json
 import sqlite3
 from contextlib import closing
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -18,6 +19,8 @@ register_heif_opener()
 
 # 关键字每这么多个字允许一处编辑（增、删、改），四个字以内必须逐字出现
 CHARS_PER_ALLOWED_ERROR = 5
+# 新书脊认领已有的书：全文比对，每这么多个字允许一处编辑，短书名必须完全一致
+CHARS_PER_CLAIM_ERROR = 10
 # 照片长边缩到这个像素数，取值依据见 ADR 0001
 MAX_PHOTO_SIDE = 2000
 
@@ -29,6 +32,17 @@ CREATE TABLE IF NOT EXISTS photos (
     width INTEGER NOT NULL,
     height INTEGER NOT NULL
 );
+-- 书：独立于照片存在，标签、豆瓣链接、改编作品都挂在这里
+CREATE TABLE IF NOT EXISTS books (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    -- 类型标签，顿号分隔，全部来自 tags 表
+    tags TEXT NOT NULL DEFAULT '',
+    douban_url TEXT NOT NULL DEFAULT '',
+    -- 改编的影视作品，JSON 列表，每项 [标题, 链接]
+    adaptations TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS spines (
     id INTEGER PRIMARY KEY,
     photo_id INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
@@ -37,8 +51,6 @@ CREATE TABLE IF NOT EXISTS spines (
     -- 使用者手工改过文字或框、或者手工插入的行
     edited INTEGER NOT NULL DEFAULT 0,
     text TEXT NOT NULL,
-    -- 类型标签，顿号分隔，全部来自 tags 表
-    tags TEXT NOT NULL DEFAULT '',
     x1 INTEGER NOT NULL,
     y1 INTEGER NOT NULL,
     x2 INTEGER NOT NULL,
@@ -61,6 +73,10 @@ class SpineNotFound(Exception):
     pass
 
 
+class BookNotFound(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class Photo:
     id: int
@@ -71,11 +87,23 @@ class Photo:
 
 
 @dataclass(frozen=True)
+class Book:
+    id: int
+    title: str
+    tags: tuple[str, ...]
+    douban_url: str
+    # (标题, 链接)
+    adaptations: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
 class Hit:
-    photo: Photo
-    spine_id: int
-    spine: Spine
-    # 关键字在书脊文字里最佳匹配处的编辑次数，0 表示逐字包含
+    book: Book
+    # 书当前所在的位置：指向它的书脊里照片最新的那条；不在任何照片上时两者为空
+    photo: Photo | None
+    spine_id: int | None
+    spine: Spine | None
+    # 关键字在书名里最佳匹配处的编辑次数，0 表示逐字包含
     errors: int
 
 
@@ -108,19 +136,25 @@ class Library:
             self._migrate(db)
 
     def _migrate(self, db):
-        # 第一版的 spines 表没有 position 和 edited 两列，补上并按原来的显示顺序编号
         columns = {row["name"] for row in db.execute("PRAGMA table_info(spines)")}
-        if "tags" not in columns:
-            db.execute("ALTER TABLE spines ADD COLUMN tags TEXT NOT NULL DEFAULT ''")
-        if "position" in columns:
-            return
-        db.execute("ALTER TABLE spines ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
-        db.execute("ALTER TABLE spines ADD COLUMN edited INTEGER NOT NULL DEFAULT 0")
-        rows = db.execute("SELECT id, photo_id FROM spines ORDER BY photo_id, x1, y1").fetchall()
-        position = {}
-        for row in rows:
-            position[row["photo_id"]] = position.get(row["photo_id"], 0) + 1
-            db.execute("UPDATE spines SET position = ? WHERE id = ?", (position[row["photo_id"]], row["id"]))
+        # 第一版的 spines 表没有 position 和 edited 两列，补上并按原来的显示顺序编号
+        if "position" not in columns:
+            db.execute("ALTER TABLE spines ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+            db.execute("ALTER TABLE spines ADD COLUMN edited INTEGER NOT NULL DEFAULT 0")
+            rows = db.execute("SELECT id, photo_id FROM spines ORDER BY photo_id, x1, y1").fetchall()
+            position = {}
+            for row in rows:
+                position[row["photo_id"]] = position.get(row["photo_id"], 0) + 1
+                db.execute("UPDATE spines SET position = ? WHERE id = ?", (position[row["photo_id"]], row["id"]))
+        # 书从书脊里拆出来之前，标签直接存在书脊上，每条书脊各自认领或新建一本书，标签随之搬到书上
+        if "book_id" not in columns:
+            db.execute("ALTER TABLE spines ADD COLUMN book_id INTEGER REFERENCES books(id)")
+            old_tags = "tags" in columns
+            rows = db.execute("SELECT * FROM spines ORDER BY photo_id, position").fetchall()
+            for row in rows:
+                tags = tuple(t for t in row["tags"].split(TAG_SEPARATOR) if t) if old_tags else ()
+                book_id = self._claim_or_create(db, row["photo_id"], row["text"], tags)
+                db.execute("UPDATE spines SET book_id = ? WHERE id = ?", (book_id, row["id"]))
 
     def _connect(self):
         db = sqlite3.connect(self.db_path)
@@ -131,56 +165,121 @@ class Library:
     def photo_path(self, photo_id: int) -> Path:
         return self.photo_dir / f"{photo_id}.jpg"
 
-    def add_photo(self, name: str, image: bytes) -> Photo:
-        name = name.strip()
-        assert name, "照片名字不能为空"
-        image = normalize_photo(image)
-        width, height = Image.open(io.BytesIO(image)).size
-        # 先识别再入库：识别失败时照片不留下任何记录
-        spines = recognize(image)
-        created_at = datetime.now().isoformat(timespec="seconds")
-        with closing(self._connect()) as db, db:
-            photo_id = db.execute(
-                "INSERT INTO photos (name, created_at, width, height) VALUES (?, ?, ?, ?)",
-                (name, created_at, width, height),
-            ).lastrowid
-            self._insert_spines(db, photo_id, spines)
-            self.photo_path(photo_id).write_bytes(image)
-        return Photo(photo_id, name, created_at, width, height)
+    # ---- 书与认领 ----
 
-    def _insert_spines(self, db, photo_id, spines):
-        ordered = self._tagged(sorted(spines, key=lambda s: (s.box.x1, s.box.y1)))
-        db.executemany(
-            "INSERT INTO spines (photo_id, position, text, tags, x1, y1, x2, y2) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            [
-                (photo_id, i, s.text, TAG_SEPARATOR.join(s.tags), s.box.x1, s.box.y1, s.box.x2, s.box.y2)
-                for i, s in enumerate(ordered, 1)
-            ],
+    def _claim_or_create(self, db, photo_id: int, text: str, tags: tuple[str, ...] | None) -> int:
+        # 新书脊认领书名相近的已有书；同一张照片上已经有书脊指向的书不能再认领，那是另一册
+        needle = compact(text)
+        pattern = regex.compile(
+            "(?:%s){e<=%d}" % (regex.escape(needle), len(needle) // CHARS_PER_CLAIM_ERROR), regex.BESTMATCH
         )
+        taken = {
+            row["book_id"]
+            for row in db.execute("SELECT book_id FROM spines WHERE photo_id = ? AND book_id IS NOT NULL", (photo_id,))
+        }
+        best = None
+        for row in db.execute("SELECT id, title FROM books"):
+            if row["id"] in taken:
+                continue
+            match = pattern.fullmatch(compact(row["title"]))
+            if match is None:
+                continue
+            errors = sum(match.fuzzy_counts)
+            if best is None or errors < best[1]:
+                best = (row["id"], errors)
+        if best is not None:
+            return best[0]
+        return db.execute(
+            "INSERT INTO books (title, tags, created_at) VALUES (?, ?, ?)",
+            (text, TAG_SEPARATOR.join(tags or ()), datetime.now().isoformat(timespec="seconds")),
+        ).lastrowid
 
-    def _tagged(self, spines: list[Spine]) -> list[Spine]:
+    def _place_spines(self, db, photo_id: int, spines: list[Spine], start_position: int = 1) -> list[int]:
+        # 按位置排好的书脊逐条入库并认领书；新建的书批量贴标签
+        spine_ids, new_books = [], []
+        for position, spine in enumerate(spines, start_position):
+            before = db.execute("SELECT max(id) FROM books").fetchone()[0] or 0
+            book_id = self._claim_or_create(db, photo_id, spine.text, None)
+            if book_id > before:
+                new_books.append((book_id, spine.text))
+            spine_ids.append(
+                db.execute(
+                    "INSERT INTO spines (photo_id, position, book_id, text, x1, y1, x2, y2) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (photo_id, position, book_id, spine.text, spine.box.x1, spine.box.y1, spine.box.x2, spine.box.y2),
+                ).lastrowid
+            )
+        self._tag_books(db, new_books)
+        return spine_ids
+
+    def _tag_books(self, db, books: list[tuple[int, str]]) -> None:
         # 标签表还没确认时不贴标签
         vocabulary = self.vocabulary()
-        if not vocabulary or not spines:
-            return spines
-        tags = assign_tags([s.text for s in spines], vocabulary)
-        return [replace(s, tags=tuple(t)) for s, t in zip(spines, tags)]
+        if not vocabulary or not books:
+            return
+        tags = assign_tags([title for _, title in books], vocabulary)
+        db.executemany(
+            "UPDATE books SET tags = ? WHERE id = ?",
+            [(TAG_SEPARATOR.join(t), book_id) for (book_id, _), t in zip(books, tags)],
+        )
+
+    def get_book(self, book_id: int) -> Book:
+        with closing(self._connect()) as db:
+            return _book(self._get_book(db, book_id))
+
+    def _get_book(self, db, book_id):
+        row = db.execute("SELECT * FROM books WHERE id = ?", (book_id,)).fetchone()
+        if row is None:
+            raise BookNotFound(book_id)
+        return row
+
+    def list_books(self) -> list[Book]:
+        with closing(self._connect()) as db:
+            return [_book(row) for row in db.execute("SELECT * FROM books ORDER BY id")]
+
+    def update_book(
+        self,
+        book_id: int,
+        tags: list[str] | None = None,
+        douban_url: str | None = None,
+        adaptations: list[tuple[str, str]] | None = None,
+    ) -> None:
+        with closing(self._connect()) as db, db:
+            current = _book(self._get_book(db, book_id))
+            new_tags = current.tags if tags is None else self._checked_tags(tags)
+            new_url = current.douban_url if douban_url is None else douban_url.strip()
+            assert not new_url or new_url.startswith("https://"), "豆瓣链接要以 https:// 开头"
+            new_adaptations = current.adaptations if adaptations is None else tuple(
+                (title.strip(), url.strip()) for title, url in adaptations if title.strip()
+            )
+            for _, url in new_adaptations:
+                assert not url or url.startswith("https://"), "改编作品的链接要以 https:// 开头"
+            db.execute(
+                "UPDATE books SET tags = ?, douban_url = ?, adaptations = ? WHERE id = ?",
+                (TAG_SEPARATOR.join(new_tags), new_url, json.dumps(new_adaptations, ensure_ascii=False), book_id),
+            )
+
+    def _checked_tags(self, tags: list[str]) -> tuple[str, ...]:
+        cleaned = []
+        for tag in tags:
+            tag = tag.strip()
+            if tag and tag not in cleaned:
+                cleaned.append(tag)
+        unknown = set(cleaned) - set(self.vocabulary())
+        assert not unknown, f"标签表里没有：{'、'.join(sorted(unknown))}"
+        assert 1 <= len(cleaned) <= 3, "每本书一到三个标签"
+        return tuple(cleaned)
 
     def retag_photo(self, photo_id: int) -> None:
-        # 按当前标签表给这张照片的全部书脊重新贴标签，文字和框不动
+        # 按当前标签表给这张照片上全部的书重新贴标签，文字和框不动
         rows = self.spines(photo_id)
-        tagged = self._tagged([spine for _, spine in rows])
         with closing(self._connect()) as db, db:
-            db.executemany(
-                "UPDATE spines SET tags = ? WHERE id = ?",
-                [(TAG_SEPARATOR.join(spine.tags), spine_id) for (spine_id, _), spine in zip(rows, tagged)],
-            )
+            self._tag_books(db, [(book.id, book.title) for _, _, book in rows])
 
     def tag_counts(self) -> list[tuple[str, int]]:
         # 按标签表顺序给出每个标签下的书数，没有书的标签也列出来（计数为 0）
         counter = {tag: 0 for tag in self.vocabulary()}
         with closing(self._connect()) as db:
-            for row in db.execute("SELECT tags FROM spines"):
+            for row in db.execute("SELECT tags FROM books"):
                 for tag in row["tags"].split(TAG_SEPARATOR):
                     if tag in counter:
                         counter[tag] += 1
@@ -198,68 +297,68 @@ class Library:
         with closing(self._connect()) as db:
             return [row["name"] for row in db.execute("SELECT name FROM tags ORDER BY position")]
 
+    # ---- 照片与书脊 ----
+
+    def add_photo(self, name: str, image: bytes) -> Photo:
+        name = name.strip()
+        assert name, "照片名字不能为空"
+        image = normalize_photo(image)
+        width, height = Image.open(io.BytesIO(image)).size
+        # 先识别再入库：识别失败时照片不留下任何记录
+        spines = recognize(image)
+        created_at = datetime.now().isoformat(timespec="seconds")
+        with closing(self._connect()) as db, db:
+            photo_id = db.execute(
+                "INSERT INTO photos (name, created_at, width, height) VALUES (?, ?, ?, ?)",
+                (name, created_at, width, height),
+            ).lastrowid
+            self._place_spines(db, photo_id, sorted(spines, key=lambda s: (s.box.x1, s.box.y1)))
+            self.photo_path(photo_id).write_bytes(image)
+        return Photo(photo_id, name, created_at, width, height)
+
     def _get_spine(self, db, spine_id):
         row = db.execute("SELECT * FROM spines WHERE id = ?", (spine_id,)).fetchone()
         if row is None:
             raise SpineNotFound(spine_id)
         return row
 
-    def update_spine(
-        self, spine_id: int, text: str | None = None, box: Box | None = None, tags: list[str] | None = None
-    ) -> None:
+    def update_spine(self, spine_id: int, text: str | None = None, box: Box | None = None) -> None:
+        # 改文字等于改正这本书的名字，书名跟着变
         with closing(self._connect()) as db, db:
             row = self._get_spine(db, spine_id)
             current = _spine(row)
             new_text = current.text if text is None else text.strip()
             new_box = current.box if box is None else box
-            new_tags = current.tags if tags is None else self._checked_tags(tags)
             assert new_text, "书脊文字不能为空"
             db.execute(
-                "UPDATE spines SET text = ?, tags = ?, x1 = ?, y1 = ?, x2 = ?, y2 = ?, edited = 1 WHERE id = ?",
-                (new_text, TAG_SEPARATOR.join(new_tags), new_box.x1, new_box.y1, new_box.x2, new_box.y2, spine_id),
+                "UPDATE spines SET text = ?, x1 = ?, y1 = ?, x2 = ?, y2 = ?, edited = 1 WHERE id = ?",
+                (new_text, new_box.x1, new_box.y1, new_box.x2, new_box.y2, spine_id),
             )
-
-    def _checked_tags(self, tags: list[str]) -> tuple[str, ...]:
-        cleaned = []
-        for tag in tags:
-            tag = tag.strip()
-            if tag and tag not in cleaned:
-                cleaned.append(tag)
-        unknown = set(cleaned) - set(self.vocabulary())
-        assert not unknown, f"标签表里没有：{'、'.join(sorted(unknown))}"
-        assert 1 <= len(cleaned) <= 3, "每本书一到三个标签"
-        return tuple(cleaned)
+            db.execute("UPDATE books SET title = ? WHERE id = ?", (new_text, row["book_id"]))
 
     def insert_spine_after(self, spine_id: int, text: str, box: Box) -> int:
         text = text.strip()
         assert text, "书脊文字不能为空"
-        # 手工插入的书也自动贴标签，不满意再手工改
-        (spine,) = self._tagged([Spine(text, box)])
         with closing(self._connect()) as db, db:
             anchor = self._get_spine(db, spine_id)
             db.execute(
                 "UPDATE spines SET position = position + 1 WHERE photo_id = ? AND position > ?",
                 (anchor["photo_id"], anchor["position"]),
             )
-            return db.execute(
-                "INSERT INTO spines (photo_id, position, edited, text, tags, x1, y1, x2, y2)"
-                " VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)",
-                (
-                    anchor["photo_id"],
-                    anchor["position"] + 1,
-                    text,
-                    TAG_SEPARATOR.join(spine.tags),
-                    box.x1,
-                    box.y1,
-                    box.x2,
-                    box.y2,
-                ),
-            ).lastrowid
+            (new_id,) = self._place_spines(db, anchor["photo_id"], [Spine(text, box)], anchor["position"] + 1)
+            db.execute("UPDATE spines SET edited = 1 WHERE id = ?", (new_id,))
+            return new_id
 
     def delete_spine(self, spine_id: int) -> None:
         with closing(self._connect()) as db, db:
             self._get_spine(db, spine_id)
             db.execute("DELETE FROM spines WHERE id = ?", (spine_id,))
+            self._prune_books(db)
+
+    def _prune_books(self, db) -> None:
+        # 使用者明确删掉书脊或照片后，没有任何书脊指向的书一起删掉；
+        # 重新识别没读出来的书不走这里，留着等下次认领
+        db.execute("DELETE FROM books WHERE id NOT IN (SELECT book_id FROM spines)")
 
     def manual_edits(self, photo_id: int) -> int:
         with closing(self._connect()) as db:
@@ -290,25 +389,34 @@ class Library:
         with closing(self._connect()) as db, db:
             db.execute("UPDATE photos SET name = ? WHERE id = ?", (name, photo_id))
 
-    def spines(self, photo_id: int) -> list[tuple[int, Spine]]:
+    def spines(self, photo_id: int) -> list[tuple[int, Spine, Book]]:
         with closing(self._connect()) as db:
-            rows = db.execute("SELECT * FROM spines WHERE photo_id = ? ORDER BY position", (photo_id,)).fetchall()
-        return [(row["id"], _spine(row)) for row in rows]
+            rows = db.execute(
+                "SELECT s.*, b.id AS book_id, b.title, b.tags, b.douban_url, b.adaptations"
+                " FROM spines s JOIN books b ON b.id = s.book_id WHERE s.photo_id = ? ORDER BY s.position",
+                (photo_id,),
+            ).fetchall()
+        return [(row["id"], _spine(row), _book(row, id_key="book_id")) for row in rows]
 
     def recognize_again(self, photo_id: int) -> None:
         self.get_photo(photo_id)
         spines = recognize(self.photo_path(photo_id).read_bytes())
         with closing(self._connect()) as db, db:
+            # 旧书脊整体换掉；书留着，新书脊按书名认领回来，豆瓣链接和改编作品不丢
             db.execute("DELETE FROM spines WHERE photo_id = ?", (photo_id,))
-            self._insert_spines(db, photo_id, spines)
+            self._place_spines(db, photo_id, sorted(spines, key=lambda s: (s.box.x1, s.box.y1)))
 
     def delete_photo(self, photo_id: int) -> None:
         self.get_photo(photo_id)
         with closing(self._connect()) as db, db:
             db.execute("DELETE FROM photos WHERE id = ?", (photo_id,))
+            self._prune_books(db)
         self.photo_path(photo_id).unlink()
 
-    def search(self, keyword: str) -> list[Hit]:
+    # ---- 搜索 ----
+
+    def search_books(self, keyword: str) -> list[tuple[Book, int]]:
+        # 关键字正好是某个标签名时，贴着这个标签的书全部算命中，再加上书名匹配到的
         needle = compact(keyword)
         if not needle:
             return []
@@ -316,24 +424,34 @@ class Library:
             "(?:%s){e<=%d}" % (regex.escape(needle), len(needle) // CHARS_PER_ALLOWED_ERROR),
             regex.BESTMATCH,
         )
-        with closing(self._connect()) as db:
-            rows = db.execute(
-                "SELECT s.id AS spine_id, s.text, s.tags, s.x1, s.y1, s.x2, s.y2,"
-                " p.id, p.name, p.created_at, p.width, p.height"
-                " FROM spines s JOIN photos p ON p.id = s.photo_id"
-            ).fetchall()
-        # 关键字正好是某个标签名时，贴着这个标签的书全部算命中，再加上文字匹配到的
         tag = next((t for t in self.vocabulary() if compact(t) == needle), None)
-        hits = []
-        for row in rows:
-            spine = _spine(row)
-            if tag is not None and tag in spine.tags:
-                hits.append(Hit(_photo(row), row["spine_id"], spine, 0))
+        matched = []
+        for book in self.list_books():
+            if tag is not None and tag in book.tags:
+                matched.append((book, 0))
                 continue
-            match = pattern.search(compact(row["text"]))
+            match = pattern.search(compact(book.title))
             if match:
-                hits.append(Hit(_photo(row), row["spine_id"], spine, sum(match.fuzzy_counts)))
-        hits.sort(key=lambda h: (h.errors, h.photo.id, h.spine_id))
+                matched.append((book, sum(match.fuzzy_counts)))
+        return matched
+
+    def search(self, keyword: str) -> list[Hit]:
+        # 每本命中的书给出它当前的位置：指向它的书脊里照片最新的那条
+        hits = []
+        with closing(self._connect()) as db:
+            for book, errors in self.search_books(keyword):
+                row = db.execute(
+                    "SELECT s.id AS spine_id, s.text, s.x1, s.y1, s.x2, s.y2,"
+                    " p.id, p.name, p.created_at, p.width, p.height"
+                    " FROM spines s JOIN photos p ON p.id = s.photo_id"
+                    " WHERE s.book_id = ? ORDER BY p.id DESC, s.position LIMIT 1",
+                    (book.id,),
+                ).fetchone()
+                if row is None:
+                    hits.append(Hit(book, None, None, None, errors))
+                else:
+                    hits.append(Hit(book, _photo(row), row["spine_id"], _spine(row), errors))
+        hits.sort(key=lambda h: (h.errors, h.photo.id if h.photo else 0, h.spine_id or 0))
         return hits
 
 
@@ -342,5 +460,10 @@ def _photo(row):
 
 
 def _spine(row):
+    return Spine(row["text"], Box(row["x1"], row["y1"], row["x2"], row["y2"]))
+
+
+def _book(row, id_key="id"):
     tags = tuple(t for t in row["tags"].split(TAG_SEPARATOR) if t)
-    return Spine(row["text"], Box(row["x1"], row["y1"], row["x2"], row["y2"]), tags)
+    adaptations = tuple((title, url) for title, url in json.loads(row["adaptations"]))
+    return Book(row[id_key], row["title"], tags, row["douban_url"], adaptations)

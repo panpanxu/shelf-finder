@@ -48,7 +48,7 @@ def test_keyword_tolerates_one_wrong_character_but_not_two(library):
 def test_simplified_and_traditional_chinese_match_each_other(tmp_path, shelf):
     lib = Library(tmp_path)
     lib.add_photo("书房左架", shelf("shelf_a")[0])
-    santi_id = next(i for i, s in lib.spines(1) if "三体" in s.text)
+    santi_id = next(i for i, s, _ in lib.spines(1) if "三体" in s.text)
     lib.update_spine(santi_id, text="三體全集 劉慈欣")
 
     # 繁体关键字找简体书脊

@@ -17,7 +17,7 @@
   <div class="viewer" id="viewer">
     <img src="{{ photo.id }}.jpg" alt="{{ photo.name }}">
     <svg id="overlay" viewBox="0 0 {{ photo.width }} {{ photo.height }}" preserveAspectRatio="none">
-      {% for spine_id, spine in spines %}
+      {% for spine_id, spine, book in spines %}
       <rect data-id="{{ spine_id }}" x="{{ spine.box.x1 }}" y="{{ spine.box.y1 }}"
             width="{{ spine.box.x2 - spine.box.x1 }}" height="{{ spine.box.y2 - spine.box.y1 }}"><title>{{ spine.text }}</title></rect>
       {% endfor %}
@@ -26,12 +26,17 @@
   </div>
   <div class="spine-col">
     <ul class="plain card" id="spines">
-      {% for spine_id, spine in spines %}
-      <li id="spine-{{ spine_id }}" data-id="{{ spine_id }}">
+      {% for spine_id, spine, book in spines %}
+      <li id="spine-{{ spine_id }}" data-id="{{ spine_id }}" data-book="{{ book.id }}">
         <span class="text">{{ spine.text }}</span>
         <span class="meta">
-          <span class="tags">{% for tag in spine.tags %}<a class="tag" href="../search.html?q={{ tag | urlencode }}">{{ tag }}</a>{% endfor %}</span>
-          <a class="douban" href="{{ douban[spine_id] }}" data-query="{{ douban_query[spine_id] }}" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          <span class="tags">{% for tag in book.tags %}<a class="tag" href="../search.html?q={{ tag | urlencode }}">{{ tag }}</a>{% endfor %}</span>
+          {% if book.douban_url %}
+          <a class="douban" href="{{ book.douban_url }}" target="_blank" rel="noopener" title="打开豆瓣条目">豆瓣条目</a>
+          {% else %}
+          <a class="douban" href="{{ douban[book.id] }}" data-query="{{ douban_query[book.id] }}" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          {% endif %}
+          {% for title, url in book.adaptations %}<a class="adaptation" {% if url %}href="{{ url }}" target="_blank" rel="noopener"{% endif %}>影视：{{ title }}</a>{% endfor %}
         </span>
       </li>
       {% else %}

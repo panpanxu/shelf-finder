@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>客厅左 · 找书</title>
+<style>
+  :root {
+    --bg: #f6f3ee; --fg: #222; --muted: #777; --card: #fff; --line: #ddd6cc;
+    --accent: #c2410c; --accent-soft: rgba(194, 65, 12, 0.18); --hit-text: #d6006f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1a18; --fg: #eee; --muted: #999; --card: #262421; --line: #3a3733;
+      --accent: #fb923c; --accent-soft: rgba(251, 146, 60, 0.22); --hit-text: #ff5db1;
+    }
+  }
+  * { box-sizing: border-box; }
+  /* .row 这类 display: flex 的规则会盖过浏览器自带的 [hidden] 规则，这里把 hidden 属性重新立起来 */
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  a { color: var(--accent); text-decoration: none; }
+  h1 { font-size: 1.4rem; margin: 0 0 12px; }
+  h2 { font-size: 1.1rem; margin: 24px 0 8px; }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  form.inline { display: inline; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input[type=text], input[type=search] { flex: 1; min-width: 0; padding: 8px 10px; font-size: 1rem;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
+  button { padding: 8px 14px; font-size: 1rem; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--card); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  ul.plain { list-style: none; padding: 0; margin: 0; }
+  ul.plain li { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  nav { margin-bottom: 12px; }
+  /* 类型标签：小圆角底色块 */
+  .tag { display: inline-block; font-size: 0.78rem; font-weight: normal; line-height: 1.4; padding: 0 6px;
+    margin-left: 4px; border-radius: 999px; background: var(--accent-soft); color: var(--fg); white-space: nowrap; }
+  .tag-cloud { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+  .tag-cloud .tag { font-size: 0.95rem; padding: 2px 10px; margin: 0; }
+  .tag small { color: var(--muted); }
+  /* 豆瓣绿，和命中的洋红色区分开 */
+  a.adaptation { white-space: nowrap; font-size: 0.85rem; font-weight: normal; color: var(--muted); margin-left: 6px; }
+  a.douban { white-space: nowrap; font-size: 0.85rem; font-weight: normal; color: #2e963d; margin-left: 6px; }
+</style>
+</head>
+<body data-page="photo" data-root="../">
+<main>
+  <nav><a href="../index.html" id="nav-back">← 全部照片</a></nav>
+  
+<style>
+  /* 图片和覆盖层叠在同一个网格单元里，覆盖层的尺寸永远等于图片实际显示的尺寸 */
+  .viewer { display: grid; position: relative; line-height: 0; max-width: 100%; }
+  .viewer > img, .viewer > svg { grid-area: 1 / 1; }
+  .viewer img { display: block; max-width: 100%; width: auto; height: auto; border-radius: 6px; }
+  .viewer svg { width: 100%; height: 100%; }
+  /* 放大镜：鼠标在照片上移动时，半透明的取景框跟着走，照片右侧的面板按原始分辨率显示取景框里的那块 */
+  .lens { position: absolute; pointer-events: none; border: 1px solid #fff; background: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
+  .zoom-panel { position: absolute; left: 100%; top: 0; margin-left: 12px; pointer-events: none; z-index: 5;
+    border: 1px solid var(--line); border-radius: 6px; background-color: #000; background-repeat: no-repeat;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); }
+  /* 框画在照片上，颜色不随明暗主题变：亮绿配黑色描边投影，在木色书架和深色书脊上都显眼 */
+  .viewer rect { fill: transparent; stroke: #39ff14; stroke-width: 3; vector-effect: non-scaling-stroke; cursor: pointer;
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer.has-hits rect { stroke: none; filter: none; }
+  .viewer rect.hit { stroke: #ff2d95; stroke-width: 4; fill: rgba(255, 45, 149, 0.28);
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer rect.active, .viewer.has-hits rect.active { stroke: #ff2d95; stroke-width: 6; fill: rgba(255, 45, 149, 0.4);
+    filter: drop-shadow(0 0 2px #000) drop-shadow(0 0 2px #000); }
+  /* 桌面宽度：整块布局占满视口剩余高度，图片在左栏居中、不随页面滚动，右栏列表在自己的范围里滚动。
+     --layout-top 是布局距离页面顶部的距离，由脚本量出来。 */
+  .layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+  .viewer-col { display: flex; align-items: center; justify-content: center; min-height: 0; }
+  @media (min-width: 761px) {
+    .layout { --available: calc(100dvh - var(--layout-top, 0px) - 16px); height: var(--available); }
+    .viewer-col { height: 100%; }
+    .viewer img { max-height: var(--available); }
+    .spine-col { height: 100%; overflow-y: auto; min-height: 0; }
+  }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+  /* 每本书两行：第一行书名和文字，第二行标签、豆瓣链接（和操作按钮） */
+  #spines li { cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+  #spines li .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-weight: normal; color: var(--fg); }
+  #spines li .meta .tags { display: flex; gap: 4px; flex-wrap: wrap; }
+  #spines li .meta .tag { margin-left: 0; }
+  #spines li.hit { font-weight: 600; color: var(--hit-text); border-left: 4px solid var(--hit-text); }
+  #spines li.active { background: var(--accent-soft); }
+</style>
+
+<h1>客厅左</h1>
+<form class="row card" action="17.html" method="get">
+  <input type="search" name="q" placeholder="在这张照片里找">
+  <button class="primary">找</button>
+</form>
+<p class="muted" id="hit-note" hidden></p>
+
+<div class="layout" style="margin-top: 12px" id="layout" data-photo="17">
+  <div class="viewer-col">
+  <div class="viewer" id="viewer">
+    <img src="17.jpg" alt="客厅左">
+    <svg id="overlay" viewBox="0 0 2000 1500" preserveAspectRatio="none">
+      
+      <rect data-id="586" x="102" y="470"
+            width="121" height="612"><title>死生有命富贵在天</title></rect>
+      
+      <rect data-id="587" x="269" y="499"
+            width="91" height="584"><title>去圣乃得真孔子</title></rect>
+      
+      <rect data-id="588" x="395" y="499"
+            width="67" height="217"><title>唯一的规则</title></rect>
+      
+      <rect data-id="589" x="532" y="503"
+            width="61" height="416"><title>人往低处走《老子天下第一》</title></rect>
+      
+      <rect data-id="590" x="699" y="485"
+            width="62" height="580"><title>李零 周行天下：从孔子到秦皇汉武</title></rect>
+      
+      <rect data-id="591" x="815" y="495"
+            width="65" height="360"><title>李零 大地文章：行走与阅读</title></rect>
+      
+      <rect data-id="592" x="918" y="501"
+            width="63" height="545"><title>李零 思想地图：中国地理的大视野</title></rect>
+      
+      <rect data-id="593" x="1010" y="511"
+            width="65" height="551"><title>李零 茫茫禹迹：中国的两次大一统</title></rect>
+      
+      <rect data-id="594" x="1132" y="590"
+            width="87" height="741"><title>沈从文 花花朵朵坛坛罐罐 沈从文谈艺术与文物</title></rect>
+      
+      <rect data-id="595" x="1251" y="548"
+            width="135" height="702"><title>愤怒的葡萄 The Grapes of Wrath 约翰·斯坦贝克 湖南文艺出版社</title></rect>
+      
+      <rect data-id="596" x="1437" y="739"
+            width="51" height="142"><title>老古玩店</title></rect>
+      
+      <rect data-id="597" x="1537" y="649"
+            width="73" height="316"><title>走出非洲 OUT OF AFRICA</title></rect>
+      
+      <rect data-id="620" x="1618" y="654"
+            width="37" height="384"><title>夜航西飞</title></rect>
+      
+      <rect data-id="621" x="1729" y="566"
+            width="48" height="431"><title>大地五亿年：土壤和生命的跃迁史</title></rect>
+      
+      <rect data-id="622" x="1804" y="679"
+            width="28" height="218"><title>花园里的哲学</title></rect>
+      
+    </svg>
+  </div>
+  </div>
+  <div class="spine-col">
+    <ul class="plain card" id="spines">
+      
+      <li id="spine-586" data-id="586" data-book="399">
+        <span class="text">死生有命富贵在天</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%AD%BB%E7%94%9F%E6%9C%89%E5%91%BD%E5%AF%8C%E8%B4%B5%E5%9C%A8%E5%A4%A9&amp;cat=1001" data-query="死生有命富贵在天" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-587" data-id="587" data-book="400">
+        <span class="text">去圣乃得真孔子</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%8E%BB%E5%9C%A3%E4%B9%83%E5%BE%97%E7%9C%9F%E5%AD%94%E5%AD%90&amp;cat=1001" data-query="去圣乃得真孔子" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-588" data-id="588" data-book="401">
+        <span class="text">唯一的规则</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%94%AF%E4%B8%80%E7%9A%84%E8%A7%84%E5%88%99&amp;cat=1001" data-query="唯一的规则" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-589" data-id="589" data-book="402">
+        <span class="text">人往低处走《老子天下第一》</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E4%BA%BA%E5%BE%80%E4%BD%8E%E5%A4%84%E8%B5%B0%E3%80%8A%E8%80%81%E5%AD%90%E5%A4%A9%E4%B8%8B%E7%AC%AC%E4%B8%80%E3%80%8B&amp;cat=1001" data-query="人往低处走《老子天下第一》" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-590" data-id="590" data-book="403">
+        <span class="text">李零 周行天下：从孔子到秦皇汉武</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%9D%8E%E9%9B%B6+%E5%91%A8%E8%A1%8C%E5%A4%A9%E4%B8%8B%EF%BC%9A%E4%BB%8E%E5%AD%94%E5%AD%90%E5%88%B0%E7%A7%A6%E7%9A%87%E6%B1%89%E6%AD%A6&amp;cat=1001" data-query="李零 周行天下：从孔子到秦皇汉武" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-591" data-id="591" data-book="404">
+        <span class="text">李零 大地文章：行走与阅读</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%9D%8E%E9%9B%B6+%E5%A4%A7%E5%9C%B0%E6%96%87%E7%AB%A0%EF%BC%9A%E8%A1%8C%E8%B5%B0%E4%B8%8E%E9%98%85%E8%AF%BB&amp;cat=1001" data-query="李零 大地文章：行走与阅读" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-592" data-id="592" data-book="405">
+        <span class="text">李零 思想地图：中国地理的大视野</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%9D%8E%E9%9B%B6+%E6%80%9D%E6%83%B3%E5%9C%B0%E5%9B%BE%EF%BC%9A%E4%B8%AD%E5%9B%BD%E5%9C%B0%E7%90%86%E7%9A%84%E5%A4%A7%E8%A7%86%E9%87%8E&amp;cat=1001" data-query="李零 思想地图：中国地理的大视野" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-593" data-id="593" data-book="406">
+        <span class="text">李零 茫茫禹迹：中国的两次大一统</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%9D%8E%E9%9B%B6+%E8%8C%AB%E8%8C%AB%E7%A6%B9%E8%BF%B9%EF%BC%9A%E4%B8%AD%E5%9B%BD%E7%9A%84%E4%B8%A4%E6%AC%A1%E5%A4%A7%E4%B8%80%E7%BB%9F&amp;cat=1001" data-query="李零 茫茫禹迹：中国的两次大一统" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-594" data-id="594" data-book="407">
+        <span class="text">沈从文 花花朵朵坛坛罐罐 沈从文谈艺术与文物</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%89%BA%E6%9C%AF%E8%AE%BE%E8%AE%A1">艺术设计</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%B2%88%E4%BB%8E%E6%96%87+%E8%8A%B1%E8%8A%B1%E6%9C%B5%E6%9C%B5%E5%9D%9B%E5%9D%9B%E7%BD%90%E7%BD%90+%E6%B2%88%E4%BB%8E%E6%96%87%E8%B0%88%E8%89%BA%E6%9C%AF%E4%B8%8E%E6%96%87%E7%89%A9&amp;cat=1001" data-query="沈从文 花花朵朵坛坛罐罐 沈从文谈艺术与文物" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-595" data-id="595" data-book="408">
+        <span class="text">愤怒的葡萄 The Grapes of Wrath 约翰·斯坦贝克 湖南文艺出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%84%A4%E6%80%92%E7%9A%84%E8%91%A1%E8%90%84+%E7%BA%A6%E7%BF%B0%C2%B7%E6%96%AF%E5%9D%A6%E8%B4%9D%E5%85%8B+%E6%B9%96%E5%8D%97%E6%96%87%E8%89%BA%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="愤怒的葡萄 约翰·斯坦贝克 湖南文艺出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-596" data-id="596" data-book="409">
+        <span class="text">老古玩店</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E8%80%81%E5%8F%A4%E7%8E%A9%E5%BA%97&amp;cat=1001" data-query="老古玩店" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-597" data-id="597" data-book="410">
+        <span class="text">走出非洲 OUT OF AFRICA</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E8%B5%B0%E5%87%BA%E9%9D%9E%E6%B4%B2&amp;cat=1001" data-query="走出非洲" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-620" data-id="620" data-book="411">
+        <span class="text">夜航西飞</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%A4%9C%E8%88%AA%E8%A5%BF%E9%A3%9E&amp;cat=1001" data-query="夜航西飞" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-621" data-id="621" data-book="412">
+        <span class="text">大地五亿年：土壤和生命的跃迁史</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E7%A7%91%E6%99%AE">科普</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%A4%A7%E5%9C%B0%E4%BA%94%E4%BA%BF%E5%B9%B4%EF%BC%9A%E5%9C%9F%E5%A3%A4%E5%92%8C%E7%94%9F%E5%91%BD%E7%9A%84%E8%B7%83%E8%BF%81%E5%8F%B2&amp;cat=1001" data-query="大地五亿年：土壤和生命的跃迁史" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-622" data-id="622" data-book="413">
+        <span class="text">花园里的哲学</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E8%8A%B1%E5%9B%AD%E9%87%8C%E7%9A%84%E5%93%B2%E5%AD%A6&amp;cat=1001" data-query="花园里的哲学" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+    </ul>
+    <p class="muted">共 15 本书，上传于 2026-10-04 10:25:15。</p>
+  </div>
+</div>
+
+<script>
+  // 量出布局距页面顶部的距离，供样式算出视口里剩余的高度；窗口大小变了重新量
+  const layout = document.getElementById("layout");
+  function measureLayoutTop() {
+    layout.style.setProperty("--layout-top", `${layout.getBoundingClientRect().top + window.scrollY}px`);
+  }
+  measureLayoutTop();
+  window.addEventListener("resize", measureLayoutTop);
+
+  const viewer = document.getElementById("viewer");
+  const photoImg = viewer.querySelector("img");
+  const NATURAL = { w: 2000, h: 1500 };
+
+  // 点框或点列表项，两边同时高亮同一本书
+  function activate(id, scroll) {
+    document.querySelectorAll(".active").forEach((el) => el.classList.remove("active"));
+    document.querySelectorAll(`[data-id="${id}"]`).forEach((el) => el.classList.add("active"));
+    if (scroll) document.getElementById(`spine-${id}`).scrollIntoView({ block: "nearest" });
+  }
+  document.querySelectorAll("rect[data-id]").forEach((el) => el.addEventListener("click", () => activate(el.dataset.id, true)));
+  document.querySelectorAll("#spines li[data-id]").forEach((el) => el.addEventListener("click", (event) => {
+    if (event.target.closest(".tools, .douban, .tag")) return;
+    activate(el.dataset.id, false);
+  }));
+  const target = location.hash.match(/^#spine-(\d+)$/);
+  if (target) activate(target[1], true);
+
+  // 放大镜：鼠标在照片上移动，取景框跟着鼠标走，照片右侧的面板按原始分辨率（1 个存储像素对应 1 个屏幕像素）
+  // 显示取景框里的那一块。面板和显示出来的照片一样大，取景框的大小就是面板在照片上对应的范围。
+  const svgOverlay = viewer.querySelector("svg");
+  const lens = document.createElement("div");
+  lens.className = "lens";
+  lens.hidden = true;
+  const panel = document.createElement("div");
+  panel.className = "zoom-panel";
+  panel.hidden = true;
+  panel.style.backgroundImage = `url("${photoImg.getAttribute("src")}")`;
+  viewer.append(lens, panel);
+
+  function moveLens(event) {
+    const shown = { w: photoImg.clientWidth, h: photoImg.clientHeight };
+    // 每个屏幕像素对应多少个原图像素
+    const scale = NATURAL.w / shown.w;
+    // 面板尽量和照片一样大，右边放不下就按剩下的空间缩
+    const room = document.documentElement.clientWidth - viewer.getBoundingClientRect().right - 24;
+    const panelW = Math.max(120, Math.min(shown.w, room));
+    const panelH = shown.h;
+    // 取景框在屏幕上的尺寸：面板尺寸换算回照片上
+    const lensW = Math.min(shown.w, panelW / scale), lensH = Math.min(shown.h, panelH / scale);
+    const r = svgOverlay.getBoundingClientRect();
+    const cx = event.clientX - r.left, cy = event.clientY - r.top;
+    const lx = Math.min(Math.max(cx - lensW / 2, 0), shown.w - lensW);
+    const ly = Math.min(Math.max(cy - lensH / 2, 0), shown.h - lensH);
+    lens.style.left = `${lx}px`;
+    lens.style.top = `${ly}px`;
+    lens.style.width = `${lensW}px`;
+    lens.style.height = `${lensH}px`;
+    panel.style.width = `${panelW}px`;
+    panel.style.height = `${panelH}px`;
+    panel.style.backgroundSize = `${NATURAL.w}px ${NATURAL.h}px`;
+    panel.style.backgroundPosition = `${-lx * scale}px ${-ly * scale}px`;
+    lens.hidden = false;
+    panel.hidden = false;
+  }
+  function hideLens() {
+    lens.hidden = true;
+    panel.hidden = true;
+  }
+  svgOverlay.addEventListener("pointermove", (event) => {
+    // 触屏没有悬停；画框模式下照片上的拖动另有用途
+    if (event.pointerType === "touch" || viewer.classList.contains("drawing")) return hideLens();
+    moveLens(event);
+  });
+  svgOverlay.addEventListener("pointerleave", hideLens);
+</script>
+
+</main>
+<script src="../data.js"></script>
+<script src="../site.js"></script>
+</body>
+</html>

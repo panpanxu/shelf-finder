@@ -123,8 +123,6 @@ class Segment:
 class Spine:
     text: str
     box: Box
-    # 类型标签，取自固定的标签表；识别阶段还没有贴标签
-    tags: tuple[str, ...] = ()
 
 
 def recognize(image: bytes) -> list[Spine]:

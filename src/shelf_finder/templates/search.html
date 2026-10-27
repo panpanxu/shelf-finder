@@ -8,12 +8,17 @@
 
 {% if groups %}
 {% for photo, hits in groups %}
+{% if photo %}
 <h2><a href="/photos/{{ photo.id }}?q={{ q | urlencode }}">{{ photo.name }}</a></h2>
+{% else %}
+<h2>不在任何照片上</h2>
+{% endif %}
 <ul class="plain card">
   {% for hit in hits %}
-  <li><a href="/photos/{{ photo.id }}?q={{ q | urlencode }}#spine-{{ hit.spine_id }}">{{ hit.spine.text }}</a>
-    {% for tag in hit.spine.tags %}<a class="tag" href="/search?q={{ tag | urlencode }}">{{ tag }}</a>{% endfor %}
-    <a class="douban" href="{{ douban[hit.spine_id] }}" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a></li>
+  <li>{% if photo %}<a href="/photos/{{ photo.id }}?q={{ q | urlencode }}#spine-{{ hit.spine_id }}">{{ hit.book.title }}</a>{% else %}{{ hit.book.title }}{% endif %}
+    {% for tag in hit.book.tags %}<a class="tag" href="/search?q={{ tag | urlencode }}">{{ tag }}</a>{% endfor %}
+    <a class="douban" href="{{ douban[hit.book.id] }}" target="_blank" rel="noopener" title="{% if hit.book.douban_url %}打开豆瓣条目{% else %}在豆瓣搜索这本书{% endif %}">豆瓣{% if hit.book.douban_url %}条目{% endif %}</a>
+    {% for title, url in hit.book.adaptations %}<a class="adaptation" {% if url %}href="{{ url }}" target="_blank" rel="noopener"{% endif %}>影视：{{ title }}</a>{% endfor %}</li>
   {% endfor %}
 </ul>
 {% endfor %}

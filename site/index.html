@@ -42,6 +42,7 @@
   .tag-cloud .tag { font-size: 0.95rem; padding: 2px 10px; margin: 0; }
   .tag small { color: var(--muted); }
   /* 豆瓣绿，和命中的洋红色区分开 */
+  a.adaptation { white-space: nowrap; font-size: 0.85rem; font-weight: normal; color: var(--muted); margin-left: 6px; }
   a.douban { white-space: nowrap; font-size: 0.85rem; font-weight: normal; color: #2e963d; margin-left: 6px; }
 </style>
 </head>
@@ -59,13 +60,22 @@
 
 <h2>按类型找</h2>
 <p class="card tag-cloud">
-  <a class="tag" href="search.html?q=%E5%B0%8F%E8%AF%B4">小说 <small>118</small></a><a class="tag" href="search.html?q=%E5%86%99%E4%BD%9C">写作 <small>43</small></a><a class="tag" href="search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史 <small>88</small></a><a class="tag" href="search.html?q=%E4%B8%96%E7%95%8C%E5%8E%86%E5%8F%B2">世界历史 <small>26</small></a><a class="tag" href="search.html?q=%E5%93%B2%E5%AD%A6">哲学 <small>26</small></a><a class="tag" href="search.html?q=%E5%BF%83%E7%90%86%E5%AD%A6">心理学 <small>17</small></a><a class="tag" href="search.html?q=%E7%A4%BE%E4%BC%9A%E7%A7%91%E5%AD%A6">社会科学 <small>23</small></a><a class="tag" href="search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献 <small>46</small></a><a class="tag" href="search.html?q=%E8%AF%97%E8%AF%8D%E6%95%A3%E6%96%87">诗词散文 <small>18</small></a><a class="tag" href="search.html?q=%E8%89%BA%E6%9C%AF%E8%AE%BE%E8%AE%A1">艺术设计 <small>15</small></a><a class="tag" href="search.html?q=%E7%94%B5%E5%BD%B1%E6%88%8F%E5%89%A7">电影戏剧 <small>13</small></a><a class="tag" href="search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物 <small>52</small></a><a class="tag" href="search.html?q=%E7%A7%91%E6%99%AE">科普 <small>44</small></a><a class="tag" href="search.html?q=%E6%95%B0%E5%AD%A6">数学 <small>28</small></a><a class="tag" href="search.html?q=%E6%95%B0%E8%AE%BA">数论 <small>7</small></a><a class="tag" href="search.html?q=%E5%87%A0%E4%BD%95">几何 <small>6</small></a><a class="tag" href="search.html?q=%E5%BE%AE%E7%A7%AF%E5%88%86">微积分 <small>5</small></a><a class="tag" href="search.html?q=%E6%95%B0%E5%AD%A6%E6%95%99%E8%82%B2">数学教育 <small>12</small></a><a class="tag" href="search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记 <small>43</small></a><a class="tag" href="search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔 <small>112</small></a><a class="tag" href="search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用 <small>24</small></a><a class="tag" href="search.html?q=%E5%85%B6%E4%BB%96">其他 <small>11</small></a>
+  <a class="tag" href="search.html?q=%E5%B0%8F%E8%AF%B4">小说 <small>139</small></a><a class="tag" href="search.html?q=%E5%86%99%E4%BD%9C">写作 <small>43</small></a><a class="tag" href="search.html?q=%E4%B8%AD%E5%9B%BD%E5%8E%86%E5%8F%B2">中国历史 <small>108</small></a><a class="tag" href="search.html?q=%E4%B8%96%E7%95%8C%E5%8E%86%E5%8F%B2">世界历史 <small>30</small></a><a class="tag" href="search.html?q=%E5%93%B2%E5%AD%A6">哲学 <small>38</small></a><a class="tag" href="search.html?q=%E5%BF%83%E7%90%86%E5%AD%A6">心理学 <small>18</small></a><a class="tag" href="search.html?q=%E7%A4%BE%E4%BC%9A%E7%A7%91%E5%AD%A6">社会科学 <small>26</small></a><a class="tag" href="search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献 <small>49</small></a><a class="tag" href="search.html?q=%E8%AF%97%E8%AF%8D%E6%95%A3%E6%96%87">诗词散文 <small>21</small></a><a class="tag" href="search.html?q=%E8%89%BA%E6%9C%AF%E8%AE%BE%E8%AE%A1">艺术设计 <small>22</small></a><a class="tag" href="search.html?q=%E7%94%B5%E5%BD%B1%E6%88%8F%E5%89%A7">电影戏剧 <small>13</small></a><a class="tag" href="search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物 <small>64</small></a><a class="tag" href="search.html?q=%E7%A7%91%E6%99%AE">科普 <small>57</small></a><a class="tag" href="search.html?q=%E6%95%B0%E5%AD%A6">数学 <small>28</small></a><a class="tag" href="search.html?q=%E6%95%B0%E8%AE%BA">数论 <small>7</small></a><a class="tag" href="search.html?q=%E5%87%A0%E4%BD%95">几何 <small>6</small></a><a class="tag" href="search.html?q=%E5%BE%AE%E7%A7%AF%E5%88%86">微积分 <small>5</small></a><a class="tag" href="search.html?q=%E6%95%B0%E5%AD%A6%E6%95%99%E8%82%B2">数学教育 <small>12</small></a><a class="tag" href="search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记 <small>48</small></a><a class="tag" href="search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔 <small>123</small></a><a class="tag" href="search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用 <small>26</small></a><a class="tag" href="search.html?q=%E5%85%B6%E4%BB%96">其他 <small>11</small></a>
 </p>
 
 
 <h2>全部照片</h2>
-<p class="muted">共 15 张照片，400 本书。</p>
+<p class="muted">共 18 张照片，466 本书。</p>
 <ul class="plain card">
+  
+  <li><a href="photos/19.html">客厅右</a>
+    <span class="muted">27 本 · 2026-10-04 10:57:03</span></li>
+  
+  <li><a href="photos/18.html">客厅中</a>
+    <span class="muted">24 本 · 2026-10-04 10:30:36</span></li>
+  
+  <li><a href="photos/17.html">客厅左</a>
+    <span class="muted">15 本 · 2026-10-04 10:25:15</span></li>
   
   <li><a href="photos/16.html">客房第二层右</a>
     <span class="muted">21 本 · 2026-10-03 11:40:01</span></li>

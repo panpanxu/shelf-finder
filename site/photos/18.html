@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>客厅中 · 找书</title>
+<style>
+  :root {
+    --bg: #f6f3ee; --fg: #222; --muted: #777; --card: #fff; --line: #ddd6cc;
+    --accent: #c2410c; --accent-soft: rgba(194, 65, 12, 0.18); --hit-text: #d6006f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1a18; --fg: #eee; --muted: #999; --card: #262421; --line: #3a3733;
+      --accent: #fb923c; --accent-soft: rgba(251, 146, 60, 0.22); --hit-text: #ff5db1;
+    }
+  }
+  * { box-sizing: border-box; }
+  /* .row 这类 display: flex 的规则会盖过浏览器自带的 [hidden] 规则，这里把 hidden 属性重新立起来 */
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  a { color: var(--accent); text-decoration: none; }
+  h1 { font-size: 1.4rem; margin: 0 0 12px; }
+  h2 { font-size: 1.1rem; margin: 24px 0 8px; }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  form.inline { display: inline; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input[type=text], input[type=search] { flex: 1; min-width: 0; padding: 8px 10px; font-size: 1rem;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }
+  button { padding: 8px 14px; font-size: 1rem; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--card); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  ul.plain { list-style: none; padding: 0; margin: 0; }
+  ul.plain li { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  nav { margin-bottom: 12px; }
+  /* 类型标签：小圆角底色块 */
+  .tag { display: inline-block; font-size: 0.78rem; font-weight: normal; line-height: 1.4; padding: 0 6px;
+    margin-left: 4px; border-radius: 999px; background: var(--accent-soft); color: var(--fg); white-space: nowrap; }
+  .tag-cloud { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+  .tag-cloud .tag { font-size: 0.95rem; padding: 2px 10px; margin: 0; }
+  .tag small { color: var(--muted); }
+  /* 豆瓣绿，和命中的洋红色区分开 */
+  a.adaptation { white-space: nowrap; font-size: 0.85rem; font-weight: normal; color: var(--muted); margin-left: 6px; }
+  a.douban { white-space: nowrap; font-size: 0.85rem; font-weight: normal; color: #2e963d; margin-left: 6px; }
+</style>
+</head>
+<body data-page="photo" data-root="../">
+<main>
+  <nav><a href="../index.html" id="nav-back">← 全部照片</a></nav>
+  
+<style>
+  /* 图片和覆盖层叠在同一个网格单元里，覆盖层的尺寸永远等于图片实际显示的尺寸 */
+  .viewer { display: grid; position: relative; line-height: 0; max-width: 100%; }
+  .viewer > img, .viewer > svg { grid-area: 1 / 1; }
+  .viewer img { display: block; max-width: 100%; width: auto; height: auto; border-radius: 6px; }
+  .viewer svg { width: 100%; height: 100%; }
+  /* 放大镜：鼠标在照片上移动时，半透明的取景框跟着走，照片右侧的面板按原始分辨率显示取景框里的那块 */
+  .lens { position: absolute; pointer-events: none; border: 1px solid #fff; background: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
+  .zoom-panel { position: absolute; left: 100%; top: 0; margin-left: 12px; pointer-events: none; z-index: 5;
+    border: 1px solid var(--line); border-radius: 6px; background-color: #000; background-repeat: no-repeat;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); }
+  /* 框画在照片上，颜色不随明暗主题变：亮绿配黑色描边投影，在木色书架和深色书脊上都显眼 */
+  .viewer rect { fill: transparent; stroke: #39ff14; stroke-width: 3; vector-effect: non-scaling-stroke; cursor: pointer;
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer.has-hits rect { stroke: none; filter: none; }
+  .viewer rect.hit { stroke: #ff2d95; stroke-width: 4; fill: rgba(255, 45, 149, 0.28);
+    filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1.5px #000); }
+  .viewer rect.active, .viewer.has-hits rect.active { stroke: #ff2d95; stroke-width: 6; fill: rgba(255, 45, 149, 0.4);
+    filter: drop-shadow(0 0 2px #000) drop-shadow(0 0 2px #000); }
+  /* 桌面宽度：整块布局占满视口剩余高度，图片在左栏居中、不随页面滚动，右栏列表在自己的范围里滚动。
+     --layout-top 是布局距离页面顶部的距离，由脚本量出来。 */
+  .layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+  .viewer-col { display: flex; align-items: center; justify-content: center; min-height: 0; }
+  @media (min-width: 761px) {
+    .layout { --available: calc(100dvh - var(--layout-top, 0px) - 16px); height: var(--available); }
+    .viewer-col { height: 100%; }
+    .viewer img { max-height: var(--available); }
+    .spine-col { height: 100%; overflow-y: auto; min-height: 0; }
+  }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+  /* 每本书两行：第一行书名和文字，第二行标签、豆瓣链接（和操作按钮） */
+  #spines li { cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+  #spines li .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-weight: normal; color: var(--fg); }
+  #spines li .meta .tags { display: flex; gap: 4px; flex-wrap: wrap; }
+  #spines li .meta .tag { margin-left: 0; }
+  #spines li.hit { font-weight: 600; color: var(--hit-text); border-left: 4px solid var(--hit-text); }
+  #spines li.active { background: var(--accent-soft); }
+</style>
+
+<h1>客厅中</h1>
+<form class="row card" action="18.html" method="get">
+  <input type="search" name="q" placeholder="在这张照片里找">
+  <button class="primary">找</button>
+</form>
+<p class="muted" id="hit-note" hidden></p>
+
+<div class="layout" style="margin-top: 12px" id="layout" data-photo="18">
+  <div class="viewer-col">
+  <div class="viewer" id="viewer">
+    <img src="18.jpg" alt="客厅中">
+    <svg id="overlay" viewBox="0 0 1500 2000" preserveAspectRatio="none">
+      
+      <rect data-id="600" x="59" y="1164"
+            width="121" height="730"><title>自然文库 Nature Series 看不见的森林 [美]戴维·乔治·哈斯凯尔 著 商务印书馆 The Commercial Press</title></rect>
+      
+      <rect data-id="601" x="135" y="1367"
+            width="62" height="531"><title>神奇的花园 [美]露丝·卡辛格 著 商务印书馆</title></rect>
+      
+      <rect data-id="602" x="189" y="1182"
+            width="65" height="680"><title>植物学家的词汇手册：图解1300条园艺常用植物学术语 [美]芭比·安吉尔 苏珊·佩尔 PEKING UNIVERSITY PRESS</title></rect>
+      
+      <rect data-id="623" x="208" y="42"
+            width="917" height="98"><title>黑塞文集 婚约 DIE VERLOBUNG [德]赫尔曼·黑塞 著 张佩芬 等译</title></rect>
+      
+      <rect data-id="624" x="212" y="155"
+            width="902" height="100"><title>黑塞文集 克林格梭尔的最后夏天 KLINGSORS LETZTER SOMMER [德]赫尔曼·黑塞 著 张佩芬 等译</title></rect>
+      
+      <rect data-id="625" x="214" y="257"
+            width="972" height="77"><title>黑塞文集 黑塞童话集 DIE MÄRCHEN [德]赫尔曼·黑塞 著 张佩芬 等译</title></rect>
+      
+      <rect data-id="626" x="177" y="338"
+            width="928" height="119"><title>黑塞文集 悉达多 SIDDHARTHA [德]赫尔曼·黑塞 著 张佩芬 等译</title></rect>
+      
+      <rect data-id="627" x="158" y="438"
+            width="921" height="100"><title>黑塞文集 荒原狼 DER STEPPENWOLF [德]赫尔曼·黑塞 著 张佩芬 等译</title></rect>
+      
+      <rect data-id="628" x="206" y="549"
+            width="930" height="78"><title>黑塞文集 诗话人生 黑塞诗选 DIE GEDICHTE HESSES [德]赫尔曼·黑塞 著 张佩芬 等译</title></rect>
+      
+      <rect data-id="629" x="199" y="620"
+            width="932" height="87"><title>黑塞文集 堤契诺之歌 散文诗与画 TESSIN [德]赫尔曼·黑塞 著 张佩芬 等译</title></rect>
+      
+      <rect data-id="630" x="171" y="705"
+            width="936" height="98"><title>黑塞文集 在轮下 UNTERM RAD [德]赫尔曼·黑塞 著 张佩芬 等译</title></rect>
+      
+      <rect data-id="631" x="158" y="768"
+            width="917" height="120"><title>黑塞文集 纳齐斯与戈德蒙 NARZISS UND GOLDMUND [德]赫尔曼·黑塞 著 张佩芬 等译</title></rect>
+      
+      <rect data-id="632" x="167" y="896"
+            width="927" height="89"><title>黑塞文集 玻璃球游戏 DAS GLASPERLENSPIEL [德]赫尔曼·黑塞 著 张佩芬 等译</title></rect>
+      
+      <rect data-id="605" x="233" y="1019"
+            width="923" height="91"><title>花的标本集：花间漫步指南 读库</title></rect>
+      
+      <rect data-id="606" x="291" y="1257"
+            width="49" height="599"><title>植物名字的故事 刘夙 著 北京大学出版社</title></rect>
+      
+      <rect data-id="608" x="352" y="1144"
+            width="922" height="92"><title>树叶标本集：林中漫步指南 读库</title></rect>
+      
+      <rect data-id="609" x="439" y="1272"
+            width="57" height="426"><title>蒙提·唐的四季自然笔记 我的世界是一座花园 光合作用</title></rect>
+      
+      <rect data-id="610" x="581" y="1251"
+            width="36" height="640"><title>汉译文学名著 卡拉马佐夫兄弟 下册 商务印书馆 The Commercial Press</title></rect>
+      
+      <rect data-id="611" x="709" y="1251"
+            width="39" height="648"><title>汉译文学名著 安娜·卡列尼娜 上卷 商务印书馆 The Commercial Press</title></rect>
+      
+      <rect data-id="612" x="830" y="1257"
+            width="44" height="654"><title>汉译文学名著 卡拉马佐夫兄弟 上册 商务印书馆 The Commercial Press</title></rect>
+      
+      <rect data-id="614" x="933" y="1258"
+            width="56" height="658"><title>汉译文学名著 安娜·卡列尼娜 下卷 商务印书馆 The Commercial Press</title></rect>
+      
+      <rect data-id="615" x="1050" y="1249"
+            width="50" height="616"><title>雾都孤儿 [英]狄更斯 著 荣如德 译 上海译文出版社</title></rect>
+      
+      <rect data-id="617" x="1110" y="1235"
+            width="113" height="724"><title>好兵帅克 OSudy dobrého vojáka Švejka za světové války Jaroslav Hašek [捷克]雅·哈谢克 北京联合出版公司</title></rect>
+      
+      <rect data-id="618" x="1302" y="1266"
+            width="70" height="395"><title>红与黑 [法]司汤达 著 张冠尧 译</title></rect>
+      
+    </svg>
+  </div>
+  </div>
+  <div class="spine-col">
+    <ul class="plain card" id="spines">
+      
+      <li id="spine-600" data-id="600" data-book="414">
+        <span class="text">自然文库 Nature Series 看不见的森林 [美]戴维·乔治·哈斯凯尔 著 商务印书馆 The Commercial Press</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E7%A7%91%E6%99%AE">科普</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E8%87%AA%E7%84%B6%E6%96%87%E5%BA%93+%E7%9C%8B%E4%B8%8D%E8%A7%81%E7%9A%84%E6%A3%AE%E6%9E%97+%E6%88%B4%E7%BB%B4%C2%B7%E4%B9%94%E6%B2%BB%C2%B7%E5%93%88%E6%96%AF%E5%87%AF%E5%B0%94+%E5%95%86%E5%8A%A1%E5%8D%B0%E4%B9%A6%E9%A6%86&amp;cat=1001" data-query="自然文库 看不见的森林 戴维·乔治·哈斯凯尔 商务印书馆" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-601" data-id="601" data-book="415">
+        <span class="text">神奇的花园 [美]露丝·卡辛格 著 商务印书馆</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E7%A7%91%E6%99%AE">科普</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%A5%9E%E5%A5%87%E7%9A%84%E8%8A%B1%E5%9B%AD+%E9%9C%B2%E4%B8%9D%C2%B7%E5%8D%A1%E8%BE%9B%E6%A0%BC+%E5%95%86%E5%8A%A1%E5%8D%B0%E4%B9%A6%E9%A6%86&amp;cat=1001" data-query="神奇的花园 露丝·卡辛格 商务印书馆" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-602" data-id="602" data-book="416">
+        <span class="text">植物学家的词汇手册：图解1300条园艺常用植物学术语 [美]芭比·安吉尔 苏珊·佩尔 PEKING UNIVERSITY PRESS</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E7%A7%91%E6%99%AE">科普</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%A4%8D%E7%89%A9%E5%AD%A6%E5%AE%B6%E7%9A%84%E8%AF%8D%E6%B1%87%E6%89%8B%E5%86%8C%EF%BC%9A%E5%9B%BE%E8%A7%A31300%E6%9D%A1%E5%9B%AD%E8%89%BA%E5%B8%B8%E7%94%A8%E6%A4%8D%E7%89%A9%E5%AD%A6%E6%9C%AF%E8%AF%AD+%E8%8A%AD%E6%AF%94%C2%B7%E5%AE%89%E5%90%89%E5%B0%94+%E8%8B%8F%E7%8F%8A%C2%B7%E4%BD%A9%E5%B0%94&amp;cat=1001" data-query="植物学家的词汇手册：图解1300条园艺常用植物学术语 芭比·安吉尔 苏珊·佩尔" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-623" data-id="623" data-book="417">
+        <span class="text">黑塞文集 婚约 DIE VERLOBUNG [德]赫尔曼·黑塞 著 张佩芬 等译</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%BB%91%E5%A1%9E%E6%96%87%E9%9B%86+%E5%A9%9A%E7%BA%A6+%E8%B5%AB%E5%B0%94%E6%9B%BC%C2%B7%E9%BB%91%E5%A1%9E+%E5%BC%A0%E4%BD%A9%E8%8A%AC+%E7%AD%89&amp;cat=1001" data-query="黑塞文集 婚约 赫尔曼·黑塞 张佩芬 等" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-624" data-id="624" data-book="418">
+        <span class="text">黑塞文集 克林格梭尔的最后夏天 KLINGSORS LETZTER SOMMER [德]赫尔曼·黑塞 著 张佩芬 等译</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%BB%91%E5%A1%9E%E6%96%87%E9%9B%86+%E5%85%8B%E6%9E%97%E6%A0%BC%E6%A2%AD%E5%B0%94%E7%9A%84%E6%9C%80%E5%90%8E%E5%A4%8F%E5%A4%A9+%E8%B5%AB%E5%B0%94%E6%9B%BC%C2%B7%E9%BB%91%E5%A1%9E+%E5%BC%A0%E4%BD%A9%E8%8A%AC+%E7%AD%89&amp;cat=1001" data-query="黑塞文集 克林格梭尔的最后夏天 赫尔曼·黑塞 张佩芬 等" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-625" data-id="625" data-book="419">
+        <span class="text">黑塞文集 黑塞童话集 DIE MÄRCHEN [德]赫尔曼·黑塞 著 张佩芬 等译</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E5%8F%A4%E5%85%B8%E6%96%87%E7%8C%AE">古典文献</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%BB%91%E5%A1%9E%E6%96%87%E9%9B%86+%E9%BB%91%E5%A1%9E%E7%AB%A5%E8%AF%9D%E9%9B%86+%E8%B5%AB%E5%B0%94%E6%9B%BC%C2%B7%E9%BB%91%E5%A1%9E+%E5%BC%A0%E4%BD%A9%E8%8A%AC+%E7%AD%89&amp;cat=1001" data-query="黑塞文集 黑塞童话集 赫尔曼·黑塞 张佩芬 等" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-626" data-id="626" data-book="420">
+        <span class="text">黑塞文集 悉达多 SIDDHARTHA [德]赫尔曼·黑塞 著 张佩芬 等译</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%BB%91%E5%A1%9E%E6%96%87%E9%9B%86+%E6%82%89%E8%BE%BE%E5%A4%9A+%E8%B5%AB%E5%B0%94%E6%9B%BC%C2%B7%E9%BB%91%E5%A1%9E+%E5%BC%A0%E4%BD%A9%E8%8A%AC+%E7%AD%89&amp;cat=1001" data-query="黑塞文集 悉达多 赫尔曼·黑塞 张佩芬 等" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-627" data-id="627" data-book="421">
+        <span class="text">黑塞文集 荒原狼 DER STEPPENWOLF [德]赫尔曼·黑塞 著 张佩芬 等译</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%BB%91%E5%A1%9E%E6%96%87%E9%9B%86+%E8%8D%92%E5%8E%9F%E7%8B%BC+%E8%B5%AB%E5%B0%94%E6%9B%BC%C2%B7%E9%BB%91%E5%A1%9E+%E5%BC%A0%E4%BD%A9%E8%8A%AC+%E7%AD%89&amp;cat=1001" data-query="黑塞文集 荒原狼 赫尔曼·黑塞 张佩芬 等" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-628" data-id="628" data-book="422">
+        <span class="text">黑塞文集 诗话人生 黑塞诗选 DIE GEDICHTE HESSES [德]赫尔曼·黑塞 著 张佩芬 等译</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%AF%97%E8%AF%8D%E6%95%A3%E6%96%87">诗词散文</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%BB%91%E5%A1%9E%E6%96%87%E9%9B%86+%E8%AF%97%E8%AF%9D%E4%BA%BA%E7%94%9F+%E9%BB%91%E5%A1%9E%E8%AF%97%E9%80%89+%E8%B5%AB%E5%B0%94%E6%9B%BC%C2%B7%E9%BB%91%E5%A1%9E+%E5%BC%A0%E4%BD%A9%E8%8A%AC+%E7%AD%89&amp;cat=1001" data-query="黑塞文集 诗话人生 黑塞诗选 赫尔曼·黑塞 张佩芬 等" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-629" data-id="629" data-book="423">
+        <span class="text">黑塞文集 堤契诺之歌 散文诗与画 TESSIN [德]赫尔曼·黑塞 著 张佩芬 等译</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%AF%97%E8%AF%8D%E6%95%A3%E6%96%87">诗词散文</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%BB%91%E5%A1%9E%E6%96%87%E9%9B%86+%E5%A0%A4%E5%A5%91%E8%AF%BA%E4%B9%8B%E6%AD%8C+%E6%95%A3%E6%96%87%E8%AF%97%E4%B8%8E%E7%94%BB+%E8%B5%AB%E5%B0%94%E6%9B%BC%C2%B7%E9%BB%91%E5%A1%9E+%E5%BC%A0%E4%BD%A9%E8%8A%AC+%E7%AD%89&amp;cat=1001" data-query="黑塞文集 堤契诺之歌 散文诗与画 赫尔曼·黑塞 张佩芬 等" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-630" data-id="630" data-book="424">
+        <span class="text">黑塞文集 在轮下 UNTERM RAD [德]赫尔曼·黑塞 著 张佩芬 等译</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E4%BA%BA%E7%89%A9%E4%BC%A0%E8%AE%B0">人物传记</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%BB%91%E5%A1%9E%E6%96%87%E9%9B%86+%E5%9C%A8%E8%BD%AE%E4%B8%8B+%E8%B5%AB%E5%B0%94%E6%9B%BC%C2%B7%E9%BB%91%E5%A1%9E+%E5%BC%A0%E4%BD%A9%E8%8A%AC+%E7%AD%89&amp;cat=1001" data-query="黑塞文集 在轮下 赫尔曼·黑塞 张佩芬 等" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-631" data-id="631" data-book="425">
+        <span class="text">黑塞文集 纳齐斯与戈德蒙 NARZISS UND GOLDMUND [德]赫尔曼·黑塞 著 张佩芬 等译</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%BB%91%E5%A1%9E%E6%96%87%E9%9B%86+%E7%BA%B3%E9%BD%90%E6%96%AF%E4%B8%8E%E6%88%88%E5%BE%B7%E8%92%99+%E8%B5%AB%E5%B0%94%E6%9B%BC%C2%B7%E9%BB%91%E5%A1%9E+%E5%BC%A0%E4%BD%A9%E8%8A%AC+%E7%AD%89&amp;cat=1001" data-query="黑塞文集 纳齐斯与戈德蒙 赫尔曼·黑塞 张佩芬 等" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-632" data-id="632" data-book="426">
+        <span class="text">黑塞文集 玻璃球游戏 DAS GLASPERLENSPIEL [德]赫尔曼·黑塞 著 张佩芬 等译</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a><a class="tag" href="../search.html?q=%E5%93%B2%E5%AD%A6">哲学</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%BB%91%E5%A1%9E%E6%96%87%E9%9B%86+%E7%8E%BB%E7%92%83%E7%90%83%E6%B8%B8%E6%88%8F+%E8%B5%AB%E5%B0%94%E6%9B%BC%C2%B7%E9%BB%91%E5%A1%9E+%E5%BC%A0%E4%BD%A9%E8%8A%AC+%E7%AD%89&amp;cat=1001" data-query="黑塞文集 玻璃球游戏 赫尔曼·黑塞 张佩芬 等" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-605" data-id="605" data-book="427">
+        <span class="text">花的标本集：花间漫步指南 读库</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E8%8A%B1%E7%9A%84%E6%A0%87%E6%9C%AC%E9%9B%86%EF%BC%9A%E8%8A%B1%E9%97%B4%E6%BC%AB%E6%AD%A5%E6%8C%87%E5%8D%97+%E8%AF%BB%E5%BA%93&amp;cat=1001" data-query="花的标本集：花间漫步指南 读库" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-606" data-id="606" data-book="428">
+        <span class="text">植物名字的故事 刘夙 著 北京大学出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E7%A7%91%E6%99%AE">科普</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%A4%8D%E7%89%A9%E5%90%8D%E5%AD%97%E7%9A%84%E6%95%85%E4%BA%8B+%E5%88%98%E5%A4%99+%E5%8C%97%E4%BA%AC%E5%A4%A7%E5%AD%A6%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="植物名字的故事 刘夙 北京大学出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-608" data-id="608" data-book="429">
+        <span class="text">树叶标本集：林中漫步指南 读库</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E7%94%9F%E6%B4%BB%E5%AE%9E%E7%94%A8">生活实用</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%A0%91%E5%8F%B6%E6%A0%87%E6%9C%AC%E9%9B%86%EF%BC%9A%E6%9E%97%E4%B8%AD%E6%BC%AB%E6%AD%A5%E6%8C%87%E5%8D%97+%E8%AF%BB%E5%BA%93&amp;cat=1001" data-query="树叶标本集：林中漫步指南 读库" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-609" data-id="609" data-book="430">
+        <span class="text">蒙提·唐的四季自然笔记 我的世界是一座花园 光合作用</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E8%87%AA%E7%84%B6%E5%8D%9A%E7%89%A9">自然博物</a><a class="tag" href="../search.html?q=%E6%96%87%E5%8C%96%E9%9A%8F%E7%AC%94">文化随笔</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E8%92%99%E6%8F%90%C2%B7%E5%94%90%E7%9A%84%E5%9B%9B%E5%AD%A3%E8%87%AA%E7%84%B6%E7%AC%94%E8%AE%B0+%E6%88%91%E7%9A%84%E4%B8%96%E7%95%8C%E6%98%AF%E4%B8%80%E5%BA%A7%E8%8A%B1%E5%9B%AD+%E5%85%89%E5%90%88%E4%BD%9C%E7%94%A8&amp;cat=1001" data-query="蒙提·唐的四季自然笔记 我的世界是一座花园 光合作用" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-610" data-id="610" data-book="431">
+        <span class="text">汉译文学名著 卡拉马佐夫兄弟 下册 商务印书馆 The Commercial Press</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%B1%89%E8%AF%91%E6%96%87%E5%AD%A6%E5%90%8D%E8%91%97+%E5%8D%A1%E6%8B%89%E9%A9%AC%E4%BD%90%E5%A4%AB%E5%85%84%E5%BC%9F+%E4%B8%8B%E5%86%8C+%E5%95%86%E5%8A%A1%E5%8D%B0%E4%B9%A6%E9%A6%86&amp;cat=1001" data-query="汉译文学名著 卡拉马佐夫兄弟 下册 商务印书馆" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-611" data-id="611" data-book="432">
+        <span class="text">汉译文学名著 安娜·卡列尼娜 上卷 商务印书馆 The Commercial Press</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%B1%89%E8%AF%91%E6%96%87%E5%AD%A6%E5%90%8D%E8%91%97+%E5%AE%89%E5%A8%9C%C2%B7%E5%8D%A1%E5%88%97%E5%B0%BC%E5%A8%9C+%E4%B8%8A%E5%8D%B7+%E5%95%86%E5%8A%A1%E5%8D%B0%E4%B9%A6%E9%A6%86&amp;cat=1001" data-query="汉译文学名著 安娜·卡列尼娜 上卷 商务印书馆" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-612" data-id="612" data-book="433">
+        <span class="text">汉译文学名著 卡拉马佐夫兄弟 上册 商务印书馆 The Commercial Press</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%B1%89%E8%AF%91%E6%96%87%E5%AD%A6%E5%90%8D%E8%91%97+%E5%8D%A1%E6%8B%89%E9%A9%AC%E4%BD%90%E5%A4%AB%E5%85%84%E5%BC%9F+%E4%B8%8A%E5%86%8C+%E5%95%86%E5%8A%A1%E5%8D%B0%E4%B9%A6%E9%A6%86&amp;cat=1001" data-query="汉译文学名著 卡拉马佐夫兄弟 上册 商务印书馆" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-614" data-id="614" data-book="434">
+        <span class="text">汉译文学名著 安娜·卡列尼娜 下卷 商务印书馆 The Commercial Press</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E6%B1%89%E8%AF%91%E6%96%87%E5%AD%A6%E5%90%8D%E8%91%97+%E5%AE%89%E5%A8%9C%C2%B7%E5%8D%A1%E5%88%97%E5%B0%BC%E5%A8%9C+%E4%B8%8B%E5%8D%B7+%E5%95%86%E5%8A%A1%E5%8D%B0%E4%B9%A6%E9%A6%86&amp;cat=1001" data-query="汉译文学名著 安娜·卡列尼娜 下卷 商务印书馆" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-615" data-id="615" data-book="435">
+        <span class="text">雾都孤儿 [英]狄更斯 著 荣如德 译 上海译文出版社</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E9%9B%BE%E9%83%BD%E5%AD%A4%E5%84%BF+%E7%8B%84%E6%9B%B4%E6%96%AF+%E8%8D%A3%E5%A6%82%E5%BE%B7+%E4%B8%8A%E6%B5%B7%E8%AF%91%E6%96%87%E5%87%BA%E7%89%88%E7%A4%BE&amp;cat=1001" data-query="雾都孤儿 狄更斯 荣如德 上海译文出版社" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-617" data-id="617" data-book="436">
+        <span class="text">好兵帅克 OSudy dobrého vojáka Švejka za světové války Jaroslav Hašek [捷克]雅·哈谢克 北京联合出版公司</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E5%A5%BD%E5%85%B5%E5%B8%85%E5%85%8B+%E9%9B%85%C2%B7%E5%93%88%E8%B0%A2%E5%85%8B+%E5%8C%97%E4%BA%AC%E8%81%94%E5%90%88%E5%87%BA%E7%89%88%E5%85%AC%E5%8F%B8&amp;cat=1001" data-query="好兵帅克 雅·哈谢克 北京联合出版公司" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+      <li id="spine-618" data-id="618" data-book="437">
+        <span class="text">红与黑 [法]司汤达 著 张冠尧 译</span>
+        <span class="meta">
+          <span class="tags"><a class="tag" href="../search.html?q=%E5%B0%8F%E8%AF%B4">小说</a></span>
+          
+          <a class="douban" href="https://search.douban.com/book/subject_search?search_text=%E7%BA%A2%E4%B8%8E%E9%BB%91+%E5%8F%B8%E6%B1%A4%E8%BE%BE+%E5%BC%A0%E5%86%A0%E5%B0%A7&amp;cat=1001" data-query="红与黑 司汤达 张冠尧" target="_blank" rel="noopener" title="在豆瓣搜索这本书">豆瓣</a>
+          
+          
+        </span>
+      </li>
+      
+    </ul>
+    <p class="muted">共 24 本书，上传于 2026-10-04 10:30:36。</p>
+  </div>
+</div>
+
+<script>
+  // 量出布局距页面顶部的距离，供样式算出视口里剩余的高度；窗口大小变了重新量
+  const layout = document.getElementById("layout");
+  function measureLayoutTop() {
+    layout.style.setProperty("--layout-top", `${layout.getBoundingClientRect().top + window.scrollY}px`);
+  }
+  measureLayoutTop();
+  window.addEventListener("resize", measureLayoutTop);
+
+  const viewer = document.getElementById("viewer");
+  const photoImg = viewer.querySelector("img");
+  const NATURAL = { w: 1500, h: 2000 };
+
+  // 点框或点列表项，两边同时高亮同一本书
+  function activate(id, scroll) {
+    document.querySelectorAll(".active").forEach((el) => el.classList.remove("active"));
+    document.querySelectorAll(`[data-id="${id}"]`).forEach((el) => el.classList.add("active"));
+    if (scroll) document.getElementById(`spine-${id}`).scrollIntoView({ block: "nearest" });
+  }
+  document.querySelectorAll("rect[data-id]").forEach((el) => el.addEventListener("click", () => activate(el.dataset.id, true)));
+  document.querySelectorAll("#spines li[data-id]").forEach((el) => el.addEventListener("click", (event) => {
+    if (event.target.closest(".tools, .douban, .tag")) return;
+    activate(el.dataset.id, false);
+  }));
+  const target = location.hash.match(/^#spine-(\d+)$/);
+  if (target) activate(target[1], true);
+
+  // 放大镜：鼠标在照片上移动，取景框跟着鼠标走，照片右侧的面板按原始分辨率（1 个存储像素对应 1 个屏幕像素）
+  // 显示取景框里的那一块。面板和显示出来的照片一样大，取景框的大小就是面板在照片上对应的范围。
+  const svgOverlay = viewer.querySelector("svg");
+  const lens = document.createElement("div");
+  lens.className = "lens";
+  lens.hidden = true;
+  const panel = document.createElement("div");
+  panel.className = "zoom-panel";
+  panel.hidden = true;
+  panel.style.backgroundImage = `url("${photoImg.getAttribute("src")}")`;
+  viewer.append(lens, panel);
+
+  function moveLens(event) {
+    const shown = { w: photoImg.clientWidth, h: photoImg.clientHeight };
+    // 每个屏幕像素对应多少个原图像素
+    const scale = NATURAL.w / shown.w;
+    // 面板尽量和照片一样大，右边放不下就按剩下的空间缩
+    const room = document.documentElement.clientWidth - viewer.getBoundingClientRect().right - 24;
+    const panelW = Math.max(120, Math.min(shown.w, room));
+    const panelH = shown.h;
+    // 取景框在屏幕上的尺寸：面板尺寸换算回照片上
+    const lensW = Math.min(shown.w, panelW / scale), lensH = Math.min(shown.h, panelH / scale);
+    const r = svgOverlay.getBoundingClientRect();
+    const cx = event.clientX - r.left, cy = event.clientY - r.top;
+    const lx = Math.min(Math.max(cx - lensW / 2, 0), shown.w - lensW);
+    const ly = Math.min(Math.max(cy - lensH / 2, 0), shown.h - lensH);
+    lens.style.left = `${lx}px`;
+    lens.style.top = `${ly}px`;
+    lens.style.width = `${lensW}px`;
+    lens.style.height = `${lensH}px`;
+    panel.style.width = `${panelW}px`;
+    panel.style.height = `${panelH}px`;
+    panel.style.backgroundSize = `${NATURAL.w}px ${NATURAL.h}px`;
+    panel.style.backgroundPosition = `${-lx * scale}px ${-ly * scale}px`;
+    lens.hidden = false;
+    panel.hidden = false;
+  }
+  function hideLens() {
+    lens.hidden = true;
+    panel.hidden = true;
+  }
+  svgOverlay.addEventListener("pointermove", (event) => {
+    // 触屏没有悬停；画框模式下照片上的拖动另有用途
+    if (event.pointerType === "touch" || viewer.classList.contains("drawing")) return hideLens();
+    moveLens(event);
+  });
+  svgOverlay.addEventListener("pointerleave", hideLens);
+</script>
+
+</main>
+<script src="../data.js"></script>
+<script src="../site.js"></script>
+</body>
+</html>

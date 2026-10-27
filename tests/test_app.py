@@ -111,7 +111,7 @@ def test_tags_show_on_the_photo_page_and_can_be_edited_with_the_text(tmp_path, s
     client = TestClient(create_app(library))
     page = upload(client, "客厅矮柜", shelf("shelf_b")[0])
     ids = [int(i) for i in re.findall(r'id="spine-(\d+)"', page.text)]
-    honglou = next(i for i, s in library.spines(1) if "红楼梦" in s.text)
+    honglou = next(i for i, s, _ in library.spines(1) if "红楼梦" in s.text)
 
     tag_link = '<a class="tag" href="/search?q=%E5%B0%8F%E8%AF%B4">小说</a>'
     assert re.search(rf'id="spine-{honglou}".*?{re.escape(tag_link)}', page.text, re.DOTALL)

@@ -13,11 +13,11 @@ def lib(tmp_path, shelf):
 
 
 def texts(lib, photo_id):
-    return [compact(spine.text) for _, spine in lib.spines(photo_id)]
+    return [compact(spine.text) for _, spine, _ in lib.spines(photo_id)]
 
 
 def test_edited_spine_text_is_what_search_finds(lib):
-    spine_id, spine = next((i, s) for i, s in lib.spines(1) if "算法导论" in s.text)
+    spine_id, spine = next((i, s) for i, s, _ in lib.spines(1) if "算法导论" in s.text)
 
     lib.update_spine(spine_id, text="算法导论（原书第3版） 机械工业出版社")
 
@@ -41,7 +41,7 @@ def test_inserted_spine_sits_right_below_the_chosen_row(lib):
 
 def test_deleted_spine_vanishes_from_list_and_search(lib):
     before = texts(lib, 1)
-    victim_id = next(i for i, s in lib.spines(1) if "红楼梦" in s.text)
+    victim_id = next(i for i, s, _ in lib.spines(1) if "红楼梦" in s.text)
 
     lib.delete_spine(victim_id)
 
