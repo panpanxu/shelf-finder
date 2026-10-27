@@ -1,6 +1,7 @@
 import json
 import shlex
 import subprocess
+import time
 
 import regex
 
@@ -12,17 +13,34 @@ from shelf_finder.library import compact
 PUBLISHER = regex.compile(r"(出版社|出版公司|出版集团|书店|书局|书馆|出版中心|Press|Media)", regex.IGNORECASE)
 
 
+# 连续请求过快豆瓣会返回 403，歇一会儿再试；连歇这么多次还不行就停下，过段时间再跑
+RATE_LIMIT_PAUSE = 120
+RATE_LIMIT_RETRIES = 2
+
+
+class RateLimited(Exception):
+    pass
+
+
 def run_cli(*args: str) -> dict | list | None:
     # 调用 douban-cli，结果一律是 JSON。没查到时它退出码 1 并在标准错误里给
-    # {"ok": false, "error": {"code": "NOT_FOUND"}}，这种当作没有结果；其他错误直接报错
+    # {"ok": false, "error": {"code": "NOT_FOUND"}}，这种当作没有结果；限流就等一等重试；其他错误直接报错
     command = shlex.split(config.DOUBAN_CLI) + list(args) + ["--json"]
-    completed = subprocess.run(command, capture_output=True, text=True, timeout=180)
-    if completed.returncode == 0:
-        return json.loads(completed.stdout)
-    error = json.loads(completed.stderr.strip() or completed.stdout.strip())
-    if error.get("error", {}).get("code") in ("NOT_FOUND", "AMBIGUOUS"):
-        return None
-    raise RuntimeError(f"douban-cli 退出码 {completed.returncode}：{error}")
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=180)
+        if completed.returncode == 0:
+            return json.loads(completed.stdout)
+        error = json.loads(completed.stderr.strip() or completed.stdout.strip())
+        code = error.get("error", {}).get("code")
+        message = error.get("error", {}).get("message", "")
+        if code in ("NOT_FOUND", "AMBIGUOUS"):
+            return None
+        if code in ("HTTP_ERROR", "RATE_LIMITED") and ("403" in message or "429" in message):
+            if attempt < RATE_LIMIT_RETRIES:
+                time.sleep(RATE_LIMIT_PAUSE)
+                continue
+            raise RateLimited(message)
+        raise RuntimeError(f"douban-cli 退出码 {completed.returncode}：{error}")
 
 
 # 书脊上的书名常带这些后缀，影视作品名里没有

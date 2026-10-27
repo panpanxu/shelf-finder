@@ -15,7 +15,7 @@ def main() -> None:
     export.add_argument("out_dir", help="输出目录，例如 site")
     sync = sub.add_parser("douban-sync", help="用 douban-cli 给还没有豆瓣条目链接的书查条目和改编作品")
     sync.add_argument("--limit", type=int, default=None, help="这次最多查几本")
-    sync.add_argument("--delay", type=float, default=3.0, help="两本书之间停几秒，默认 3")
+    sync.add_argument("--delay", type=float, default=6.0, help="两本书之间停几秒，默认 6")
     args = parser.parse_args()
 
     library = Library(config.DATA_DIR)
@@ -27,7 +27,10 @@ def main() -> None:
         return
     if args.command == "douban-sync":
         counts = library.sync_douban(delay=args.delay, limit=args.limit, log=print)
-        print(f"查了 {counts['looked_up']} 本：{counts['subjects']} 本有条目，{counts['adaptations']} 部改编作品")
+        print(
+            f"查了 {counts['looked_up']} 本：{counts['subjects']} 本有条目，{counts['adaptations']} 部改编作品，"
+            f"还剩 {counts['remaining']} 本" + ("（被限流，过几分钟再跑）" if counts["rate_limited"] else "")
+        )
         return
 
     # 绑定全部网卡，手机在同一局域网里用浏览器访问

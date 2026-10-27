@@ -419,19 +419,26 @@ class Library:
     def sync_douban(self, delay: float = 3.0, limit: int | None = None, log=lambda message: None) -> dict[str, int]:
         # 给还没有豆瓣条目链接的书查条目和改编作品，每本书查两次网页，所以请求之间停一会儿；
         # 查过的书不再查（查不到条目的也记一个标记，免得每次都重查）
-        from shelf_finder.douban_sync import find_adaptations, find_subject
+        from shelf_finder.douban_sync import RateLimited, find_adaptations, find_subject
 
         with closing(self._connect()) as db:
             pending_ids = [row["id"] for row in db.execute("SELECT id FROM books WHERE douban_url = '' ORDER BY id")]
         pending = [book for book in self.list_books() if book.id in set(pending_ids)]
         if limit is not None:
             pending = pending[:limit]
-        counts = {"looked_up": 0, "subjects": 0, "adaptations": 0}
+        counts = {"looked_up": 0, "subjects": 0, "adaptations": 0, "remaining": len(pending), "rate_limited": False}
         for index, book in enumerate(pending):
             if index and delay:
                 time.sleep(delay)
-            subject = find_subject(book.title)
-            adaptations = find_adaptations(book.title)
+            try:
+                subject = find_subject(book.title)
+                adaptations = find_adaptations(book.title)
+            except RateLimited:
+                # 豆瓣暂时拒绝了，已经查完的都存好了，下次从这本接着查
+                counts["rate_limited"] = True
+                log(f"豆瓣限流，先停在《{book.title}》，稍后再跑")
+                break
+            counts["remaining"] -= 1
             counts["looked_up"] += 1
             counts["subjects"] += bool(subject)
             counts["adaptations"] += len(adaptations)
