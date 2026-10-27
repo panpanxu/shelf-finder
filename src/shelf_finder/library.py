@@ -1,6 +1,7 @@
 import io
 import json
 import sqlite3
+import time
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
@@ -63,6 +64,8 @@ CREATE TABLE IF NOT EXISTS tags (
 );
 """
 TAG_SEPARATOR = "、"
+# 豆瓣上查过但没找到条目的书，链接列存这个标记，页面上当作没有链接
+NO_SUBJECT = "-"
 
 
 class PhotoNotFound(Exception):
@@ -413,6 +416,33 @@ class Library:
             self._prune_books(db)
         self.photo_path(photo_id).unlink()
 
+    def sync_douban(self, delay: float = 3.0, limit: int | None = None, log=lambda message: None) -> dict[str, int]:
+        # 给还没有豆瓣条目链接的书查条目和改编作品，每本书查两次网页，所以请求之间停一会儿；
+        # 查过的书不再查（查不到条目的也记一个标记，免得每次都重查）
+        from shelf_finder.douban_sync import find_adaptations, find_subject
+
+        with closing(self._connect()) as db:
+            pending_ids = [row["id"] for row in db.execute("SELECT id FROM books WHERE douban_url = '' ORDER BY id")]
+        pending = [book for book in self.list_books() if book.id in set(pending_ids)]
+        if limit is not None:
+            pending = pending[:limit]
+        counts = {"looked_up": 0, "subjects": 0, "adaptations": 0}
+        for index, book in enumerate(pending):
+            if index and delay:
+                time.sleep(delay)
+            subject = find_subject(book.title)
+            adaptations = find_adaptations(book.title)
+            counts["looked_up"] += 1
+            counts["subjects"] += bool(subject)
+            counts["adaptations"] += len(adaptations)
+            with closing(self._connect()) as db, db:
+                db.execute(
+                    "UPDATE books SET douban_url = ?, adaptations = ? WHERE id = ?",
+                    (subject or NO_SUBJECT, json.dumps(adaptations, ensure_ascii=False), book.id),
+                )
+            log(f"{book.title} → {'条目' if subject else '没找到条目'}，{len(adaptations)} 部改编作品")
+        return counts
+
     # ---- 搜索 ----
 
     def search_books(self, keyword: str) -> list[tuple[Book, int]]:
@@ -466,4 +496,5 @@ def _spine(row):
 def _book(row, id_key="id"):
     tags = tuple(t for t in row["tags"].split(TAG_SEPARATOR) if t)
     adaptations = tuple((title, url) for title, url in json.loads(row["adaptations"]))
-    return Book(row[id_key], row["title"], tags, row["douban_url"], adaptations)
+    douban_url = "" if row["douban_url"] == NO_SUBJECT else row["douban_url"]
+    return Book(row[id_key], row["title"], tags, douban_url, adaptations)
