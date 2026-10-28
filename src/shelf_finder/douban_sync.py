@@ -86,6 +86,17 @@ def find_subject(spine_text: str) -> str | None:
     return best[1] if best else None
 
 
+# 影视片名后面常带的季数、版本说明
+FILM_SUFFIX = regex.compile(r"(第[一二三四五六七八九十\d]+季|[（(][^（()）]*[)）]|电影版|剧版|\s+Season\s*\d+)$", regex.IGNORECASE)
+
+
+def film_title(title: str) -> str:
+    previous = None
+    while previous != title:
+        previous, title = title, FILM_SUFFIX.sub("", title).strip()
+    return compact(title)
+
+
 def find_adaptations(spine_text: str) -> list[tuple[str, str]]:
     # 同名影视只有在简介里能对上这本书时才算改编作品，光是片名相同不算
     title, author, _ = parse_spine(spine_text)
@@ -94,6 +105,9 @@ def find_adaptations(spine_text: str) -> list[tuple[str, str]]:
         return []
     result = run_cli("movie", title)
     if not isinstance(result, dict) or not result.get("summary"):
+        return []
+    # douban-cli 会返回片名最接近的作品，片名必须和书名一样（去掉「第一季」这类后缀）才往下看
+    if film_title(result["title"]) != compact(title):
         return []
     # 简介里要有「改编」、书名号括起来的书名、或者书脊上的作者名，三样里至少一样
     summary = result["summary"]

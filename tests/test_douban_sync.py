@@ -28,6 +28,12 @@ def test_adaptation_needs_a_film_whose_summary_says_it_was_adapted_from_the_auth
     assert find_adaptations("算法导论 机械工业出版社") == []
 
 
+def test_closest_titled_film_with_a_different_name_is_not_an_adaptation():
+    # 实际同步中出现过的误判：搜「米」返回《大鸿米店》，搜「小城」返回《小城良方》
+    assert find_adaptations("米 蒙田随笔") == []
+    assert find_adaptations("小城") == []
+
+
 def test_sync_fills_books_once_and_skips_them_afterwards(tmp_path, shelf):
     lib = Library(tmp_path)
     photo = lib.add_photo("客厅矮柜", shelf("shelf_b")[0])
